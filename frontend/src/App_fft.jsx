@@ -1,30 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Line, Bar } from 'react-chartjs-2';
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
   Tooltip,
   Legend,
-  Filler
-} from 'chart.js';
+  ResponsiveContainer
+} from 'recharts';
 import './index.css';
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-);
 
 const API_BASE_URL = 'http://localhost:5001';
 const SENSORS = ['acceleration', 'current', 'audio'];
@@ -121,142 +106,86 @@ function StatisticsTable({ sensorData, mode }) {
   );
 }
 
-function FFTLineChart({ sensor, frequencies, amplitudes }) {
+function FFTSpectrumChart({ sensor, frequencies, amplitudes }) {
   if (!frequencies || frequencies.length === 0 || !amplitudes || amplitudes.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-lg p-6">
         <h3 className="font-semibold capitalize mb-4">{sensor} - FFT Spectrum</h3>
-        <p className="text-gray-500">No FFT data available</p>
+        <p className="text-gray-500">No frequency data available</p>
       </div>
     );
   }
 
-  const chartData = {
-    labels: frequencies.map(f => f.toFixed(1)),
-    datasets: [
-      {
-        label: `${sensor} Frequency Spectrum`,
-        data: amplitudes,
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        fill: true,
-        tension: 0.4,
-        pointRadius: 2,
-        pointBackgroundColor: '#3b82f6',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 1,
-        pointHoverRadius: 4
-      }
-    ]
-  };
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: {
-        display: true,
-        labels: {
-          usePointStyle: true,
-          padding: 15
-        }
-      },
-      tooltip: {
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        padding: 12,
-        titleFont: { size: 14 }
-      }
-    },
-    scales: {
-      x: {
-        title: {
-          display: true,
-          text: 'Frequency (Hz)',
-          font: { size: 12, weight: 'bold' }
-        },
-        ticks: {
-          maxTicksLimit: 20
-        }
-      },
-      y: {
-        title: {
-          display: true,
-          text: 'Amplitude',
-          font: { size: 12, weight: 'bold' }
-        }
-      }
-    }
-  };
+  // Prepare data for bar chart
+  const chartData = frequencies.map((freq, idx) => ({
+    name: `${freq.toFixed(1)} Hz`,
+    frequency: parseFloat(freq.toFixed(2)),
+    amplitude: parseFloat((amplitudes[idx] || 0).toFixed(4))
+  }));
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
-      <h3 className="font-semibold capitalize mb-4">{sensor} - Full FFT Spectrum</h3>
-      <div style={{ height: '300px' }}>
-        <Line data={chartData} options={options} />
+      <h3 className="font-semibold capitalize mb-4">{sensor} - FFT Spectrum (Top 5 Frequencies)</h3>
+      <ResponsiveContainer width="100%" height={300}>
+        <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 60 }}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis 
+            dataKey="name" 
+            angle={-45}
+            textAnchor="end"
+            height={100}
+            interval={0}
+          />
+          <YAxis label={{ value: 'Amplitude', angle: -90, position: 'insideLeft' }} />
+          <Tooltip 
+            formatter={(value) => value.toFixed(4)}
+            labelFormatter={(label) => `${label}`}
+          />
+          <Bar dataKey="amplitude" fill="#3b82f6" radius={[8, 8, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+      <div className="mt-4 p-3 bg-gray-50 rounded text-sm">
+        <p className="text-gray-700">
+          <strong>Max Amplitude:</strong> {Math.max(...amplitudes).toFixed(4)} at{' '}
+          <strong>{frequencies[amplitudes.indexOf(Math.max(...amplitudes))].toFixed(2)} Hz</strong>
+        </p>
       </div>
     </div>
   );
 }
 
-function TopFrequenciesChart({ sensor, frequencies, amplitudes }) {
+function FrequencyListTable({ sensor, frequencies, amplitudes }) {
   if (!frequencies || frequencies.length === 0 || !amplitudes || amplitudes.length === 0) {
     return null;
   }
 
-  const chartData = {
-    labels: frequencies.map((f, idx) => `${(idx + 1)}`),
-    datasets: [
-      {
-        label: 'Top 5 Frequencies',
-        data: amplitudes,
-        backgroundColor: ['#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe'],
-        borderColor: '#3b82f6',
-        borderWidth: 1,
-        borderRadius: 4
-      }
-    ]
-  };
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: {
-        display: false
-      }
-    },
-    scales: {
-      x: {
-        title: {
-          display: true,
-          text: 'Frequency Rank',
-          font: { size: 12, weight: 'bold' }
-        }
-      },
-      y: {
-        title: {
-          display: true,
-          text: 'Amplitude',
-          font: { size: 12, weight: 'bold' }
-        }
-      }
-    }
-  };
-
   return (
-    <div className="bg-gray-100 rounded-lg p-4 mt-4">
-      <h4 className="font-semibold text-sm mb-3">Top 5 Peak Frequencies</h4>
-      <div className="grid grid-cols-5 gap-2 mb-4">
-        {frequencies.map((freq, idx) => (
-          <div key={idx} className="text-center">
-            <p className="text-xs font-semibold text-gray-700">{freq.toFixed(1)} Hz</p>
-            <p className="text-xs text-gray-600">Amp: {amplitudes[idx]?.toFixed(2)}</p>
-          </div>
-        ))}
-      </div>
-      <div style={{ height: '150px' }}>
-        <Bar data={chartData} options={options} />
-      </div>
+    <div className="bg-gray-50 rounded-lg p-4 mt-4">
+      <h4 className="font-semibold mb-3 text-sm">Frequency Components</h4>
+      <table className="w-full text-sm">
+        <thead className="bg-gray-200 border-b">
+          <tr>
+            <th className="px-3 py-2 text-left">Rank</th>
+            <th className="px-3 py-2 text-left">Frequency (Hz)</th>
+            <th className="px-3 py-2 text-right">Amplitude</th>
+            <th className="px-3 py-2 text-right">% of Max</th>
+          </tr>
+        </thead>
+        <tbody>
+          {frequencies.map((freq, idx) => {
+            const maxAmp = Math.max(...amplitudes);
+            const percentage = maxAmp > 0 ? ((amplitudes[idx] / maxAmp) * 100).toFixed(1) : 0;
+            return (
+              <tr key={idx} className="border-b hover:bg-gray-100">
+                <td className="px-3 py-2">{idx + 1}</td>
+                <td className="px-3 py-2 font-mono">{freq.toFixed(2)}</td>
+                <td className="px-3 py-2 text-right font-mono">{amplitudes[idx].toFixed(4)}</td>
+                <td className="px-3 py-2 text-right">{percentage}%</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -297,7 +226,7 @@ function App() {
     if (autoRefresh) {
       const interval = setInterval(() => {
         fetchSensorData(mode);
-      }, 5000);
+      }, 5000); // Refresh every 5 seconds
       return () => clearInterval(interval);
     }
   }, [autoRefresh, mode]);
@@ -314,7 +243,7 @@ function App() {
         <div className="flex justify-between items-start mb-6">
           <div>
             <h1 className="text-4xl font-bold text-white mb-2">Predictive Maintenance</h1>
-            <p className="text-gray-400">Real-time sensor monitoring and FFT analysis</p>
+            <p className="text-gray-400">Real-time sensor monitoring and analysis with FFT spectrum visualization</p>
           </div>
           <div className="text-right">
             <p className="text-gray-400 text-sm">Last updated: <span className="text-green-400 font-semibold">{lastUpdate || 'Never'}</span></p>
@@ -385,22 +314,25 @@ function App() {
             <StatisticsTable sensorData={sensorData} mode={mode} />
           </div>
 
-          {/* Full FFT Spectrum Line Graphs */}
-          <div className="max-w-7xl mx-auto grid grid-cols-1 gap-8 mt-8 mb-8">
-            {SENSORS.map(sensor => (
-              <div key={`fft-${sensor}`}>
-                <FFTLineChart
-                  sensor={sensor}
-                  frequencies={sensorData[sensor]?.full_spectrum_freqs || []}
-                  amplitudes={sensorData[sensor]?.full_spectrum_amps || []}
-                />
-                <TopFrequenciesChart
-                  sensor={sensor}
-                  frequencies={sensorData[sensor]?.frequencies || []}
-                  amplitudes={sensorData[sensor]?.amplitudes || []}
-                />
-              </div>
-            ))}
+          {/* FFT Spectrum Charts */}
+          <div className="max-w-7xl mx-auto mt-8 mb-8">
+            <h2 className="text-3xl font-bold text-white mb-6">FFT Frequency Spectrum Analysis</h2>
+            <div className="grid grid-cols-1 gap-8">
+              {SENSORS.map(sensor => (
+                <div key={`fft-${sensor}`} className="bg-white rounded-lg shadow-lg overflow-hidden">
+                  <FFTSpectrumChart
+                    sensor={sensor}
+                    frequencies={sensorData[sensor]?.frequencies || []}
+                    amplitudes={sensorData[sensor]?.amplitudes || []}
+                  />
+                  <FrequencyListTable
+                    sensor={sensor}
+                    frequencies={sensorData[sensor]?.frequencies || []}
+                    amplitudes={sensorData[sensor]?.amplitudes || []}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Data Points Info */}

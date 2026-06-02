@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: predictive-maintenance
+    env: python
+    plan: free
+    pythonVersion: 3.12
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.12

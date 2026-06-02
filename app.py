@@ -1,611 +1,589 @@
-from flask import Flask, jsonify, send_from_directory, abort, Response, request
-from flask_socketio import SocketIO
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 import os
 import glob
-import datetime
-import re
-import json
 import csv
 import numpy as np
 from scipy import stats
-from event_manager import EventManager
+import datetime as dt
+import logging
+from functools import wraps
+import hashlib
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:5173"])  # Vite default port
-socketio = SocketIO(app, cors_allowed_origins=["http://localhost:5173", "http://127.0.0.1:5173"])
 
-# Configure the data directory
+# CORS configuration - allow frontend and production domains
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    # Add your production domain here:
+    # "https://your-domain.com",
+    # "https://your-domain.onrender.com"
+]
+CORS(app, origins=ALLOWED_ORIGINS)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Configure directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'Data')
-EVENTS_DIR = os.path.join(BASE_DIR, 'Events')
-FNAME_RE = re.compile(r"^[^/\\]+\.csv$")  # simple guard against path traversal
+UPLOAD_LOG_DIR = os.path.join(BASE_DIR, 'UploadLogs')
 os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(EVENTS_DIR, exist_ok=True)
+os.makedirs(UPLOAD_LOG_DIR, exist_ok=True)
 
-# Initialize Event Manager
-event_manager = EventManager(EVENTS_DIR, DATA_DIR)
+# Sensor configuration
+SENSORS = ['acceleration', 'current', 'audio']
+SAMPLING_RATE = 700  # 1400 points per 2 seconds
 
-def load_config():
-    cfg_path = os.path.join(BASE_DIR, 'config.json')
-    default_cfg = {"interval_seconds": 300}
+# Upload security configuration
+UPLOAD_API_KEYS = {
+    'sensor-001': 'sk_prod_7f3b8e2a9c1d4f6e5a2b9c8d7e1f3a5b',
+    'sensor-002': 'sk_prod_2c5d8f1a4e7b9a3d6f2e5c8b1a4d7f3e'
+}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_CSV_ROWS = 10000  # Reasonable for 2-second samples
+UPLOAD_FREQUENCY_MINUTES = 110  # Min 110 mins between uploads (2hr target +10min buffer)
+UPLOAD_BATCH_SIZE = 2  # Expected 2 files per upload (max and min)
+
+def load_csv_data(filename):
+    """Load CSV data and return timestamps and values."""
+    filepath = os.path.join(DATA_DIR, filename)
+    if not os.path.exists(filepath):
+        return [], []
+    
+    timestamps = []
+    values = []
     try:
-        with open(cfg_path, 'r', encoding='utf-8') as f:
-            cfg = json.load(f)
-            if not isinstance(cfg.get('interval_seconds'), int):
-                return default_cfg
-            return cfg
-    except (FileNotFoundError, json.JSONDecodeError):
-        return default_cfg
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    # Handle timestamp
+                    timestamp_str = row.get('timestamp', '')
+                    if 'T' in timestamp_str:  # ISO format
+                        dt_obj = dt.datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                        timestamp = dt_obj.timestamp() * 1000
+                    else:
+                        timestamp = float(timestamp_str)
+                    
+                    # Handle value
+                    value = float(row.get('value', 0))
+                    timestamps.append(timestamp)
+                    values.append(value)
+                except (ValueError, KeyError):
+                    continue
+    except Exception as e:
+        print(f"Error loading {filename}: {e}")
+    
+    return timestamps, values
 
-CONFIG = load_config()
+def merge_max_min_files(max_timestamps, max_values, min_timestamps, min_values):
+    """
+    Merge max and min files by sorting all values by timestamp.
+    Returns sorted combined timestamps and values.
+    """
+    if not max_values or not min_values:
+        return [], []
+    
+    # Create list of (timestamp, value) tuples
+    combined = []
+    for ts, val in zip(max_timestamps, max_values):
+        combined.append((ts, val))
+    for ts, val in zip(min_timestamps, min_values):
+        combined.append((ts, val))
+    
+    # Sort by timestamp
+    combined.sort(key=lambda x: x[0])
+    
+    # Separate back into timestamps and values
+    merged_timestamps = [item[0] for item in combined]
+    merged_values = [item[1] for item in combined]
+    
+    return merged_timestamps, merged_values
 
-def calculate_statistics(z_values):
-    """Calculate comprehensive statistical parameters for acceleration data."""
-    if not z_values or len(z_values) == 0:
+def calculate_statistics(values):
+    """Calculate statistical parameters for sensor data."""
+    if not values or len(values) == 0:
         return {}
     
     def safe_float(val):
-        """Convert value to float, replacing NaN/Inf with 0."""
         f = float(val)
         if np.isnan(f) or np.isinf(f):
             return 0.0
         return f
     
-    z_array = np.array(z_values)
+    z_array = np.array(values)
     
-    # Basic Amplitude Statistics
-    max_val = np.max(z_array)
-    min_val = np.min(z_array)
-    mean_val = np.mean(z_array)
-    abs_mean = np.mean(np.abs(z_array))
-    rms = np.sqrt(np.mean(z_array**2))
-    variance = np.var(z_array)
-    std_dev = np.std(z_array)
-    peak = max(abs(max_val), abs(min_val))
-    peak_to_peak = max_val - min_val
-    
-    # Severity / Health Ratios
-    crest_factor = peak / rms if rms != 0 else 0
-    impulse_factor = peak / abs_mean if abs_mean != 0 else 0
-    shape_factor = rms / abs_mean if abs_mean != 0 else 0
-    clearance_factor = peak / (np.mean(np.sqrt(np.abs(z_array)))**2) if np.mean(np.sqrt(np.abs(z_array))) != 0 else 0
-    
-    # Distribution Shape Features
-    skewness = stats.skew(z_array)
-    kurtosis_val = stats.kurtosis(z_array)
-    excess_kurtosis = kurtosis_val  # scipy.stats.kurtosis already returns excess kurtosis by default
-    
-    # Optional Extras
-    energy = np.sum(z_array**2)
-    
-    # Zero-crossing rate
-    zero_crossings = np.sum(np.diff(np.signbit(z_array)))
-    zero_crossing_rate = zero_crossings / len(z_array) if len(z_array) > 1 else 0
-    
-    # Percentiles
-    percentile_90 = np.percentile(z_array, 90)
-    percentile_95 = np.percentile(z_array, 95)
-    percentile_99 = np.percentile(z_array, 99)
-    
-    return {
-        # Basic Amplitude Statistics
-        'max': safe_float(max_val),
-        'min': safe_float(min_val),
-        'mean': safe_float(mean_val),
-        'abs_mean': safe_float(abs_mean),
-        'rms': safe_float(rms),
-        'variance': safe_float(variance),
-        'std_dev': safe_float(std_dev),
-        'peak': safe_float(peak),
-        'peak_to_peak': safe_float(peak_to_peak),
-        
-        # Severity / Health Ratios
-        'crest_factor': safe_float(crest_factor),
-        'impulse_factor': safe_float(impulse_factor),
-        'shape_factor': safe_float(shape_factor),
-        'clearance_factor': safe_float(clearance_factor),
-        
-        # Distribution Shape Features
-        'skewness': safe_float(skewness),
-        'kurtosis': safe_float(kurtosis_val),
-        'excess_kurtosis': safe_float(excess_kurtosis),
-        
-        # Optional Extras
-        'energy': safe_float(energy),
-        'zero_crossing_rate': safe_float(zero_crossing_rate),
-        'percentile_90': safe_float(percentile_90),
-        'percentile_95': safe_float(percentile_95),
-        'percentile_99': safe_float(percentile_99)
+    stats_dict = {
+        'mean': safe_float(np.mean(z_array)),
+        'max': safe_float(np.max(z_array)),
+        'min': safe_float(np.min(z_array)),
+        'std_dev': safe_float(np.std(z_array)),
+        'range': safe_float(np.max(z_array) - np.min(z_array)),
+        'skewness': safe_float(stats.skew(z_array)),
+        'kurtosis': safe_float(stats.kurtosis(z_array))
     }
-
-class FileChangeHandler(FileSystemEventHandler):
-    def on_created(self, event):
-        if not event.is_directory and event.src_path.endswith('.csv'):
-            # Emit the new file event to connected clients
-            file_info = get_file_info(event.src_path)
-            socketio.emit('file_created', file_info)
-
-    def on_modified(self, event):
-        if not event.is_directory and event.src_path.endswith('.csv'):
-            # Emit the file modified event to connected clients
-            file_info = get_file_info(event.src_path)
-            socketio.emit('file_modified', file_info)
-
-def get_file_info(filepath):
-    stats = os.stat(filepath)
-    return {
-        'name': os.path.basename(filepath),
-        'size': stats.st_size,
-        'modified': datetime.datetime.fromtimestamp(stats.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
-        'path': filepath
-    }
-
-# Removed template route - now API-only for React frontend
-
-@app.route('/files')
-def get_files():
-    files = []
-    for filepath in glob.glob(os.path.join(DATA_DIR, '*.csv')):
-        files.append(get_file_info(filepath))
-    return jsonify(files)
-
-def _resolve_csv_path(name: str) -> str:
-    """Validate and resolve CSV path within DATA_DIR."""
-    if not FNAME_RE.match(name or ""):
-        abort(400, description="Invalid file name")
-    fpath = os.path.join(DATA_DIR, name)
-    if not os.path.isfile(fpath):
-        abort(404, description="File not found")
-    return fpath
-
-@app.route('/download/<path:name>')
-def download_file(name):
-    # Validate and serve as attachment
-    _resolve_csv_path(name)
-    return send_from_directory(DATA_DIR, name, as_attachment=True, mimetype='text/csv', download_name=name)
-
-@app.route('/view/<path:name>')
-def view_file(name):
-    # Stream a small preview inline (first ~200 KB) as text for quick viewing
-    fpath = _resolve_csv_path(name)
-    try:
-        chunks = []
-        read_bytes = 0
-        limit = 200 * 1024  # 200 KB preview
-        with open(fpath, 'rb') as f:
-            while read_bytes < limit:
-                chunk = f.read(min(16 * 1024, limit - read_bytes))
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                read_bytes += len(chunk)
-        content = b''.join(chunks)
-        # Ensure text rendering in browser
-        return Response(content, mimetype='text/plain; charset=utf-8', headers={
-            'Cache-Control': 'no-store'
-        })
-    except OSError:
-        abort(500, description="Error reading file")
-
-def load_20_day_data():
-    """Load and aggregate data from multiple max_reading files over the last 20 days."""
-    import datetime as dt
     
-    # Find all max_reading files
-    max_reading_files = glob.glob(os.path.join(DATA_DIR, 'max_reading*.csv'))
-    
-    if not max_reading_files:
-        return [], [], "No max_reading files found"
-    
-    # Sort files by modification time (newest first)
-    max_reading_files.sort(key=os.path.getmtime, reverse=True)
-    
-    # Calculate 20 days ago
-    twenty_days_ago = dt.datetime.now() - dt.timedelta(days=20)
-    
-    timestamps = []
-    z_values = []
-    files_processed = 0
-    
-    # Process files from the last 20 days
-    for file_path in max_reading_files:
-        # Check if file is within 20 days
-        file_mtime = dt.datetime.fromtimestamp(os.path.getmtime(file_path))
-        if file_mtime < twenty_days_ago:
-            continue
-            
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                
-                for row in reader:
-                    try:
-                        # Handle different timestamp formats
-                        timestamp_str = row['timestamp']
-                        if 'T' in timestamp_str:  # ISO format
-                            dt_obj = dt.datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                            timestamp = dt_obj.timestamp() * 1000
-                        else:
-                            timestamp = float(timestamp_str)
-                        
-                        # Handle different value column names
-                        if 'z' in row:
-                            z_value = float(row['z'])
-                        elif 'value' in row:
-                            z_value = float(row['value'])
-                        else:
-                            continue
-                            
-                        timestamps.append(timestamp)
-                        z_values.append(z_value)
-                        
-                    except (ValueError, KeyError):
-                        continue
-                
-                files_processed += 1
-                    
-        except Exception as e:
-            print(f"Error processing file {file_path}: {e}")
-            continue
-    
-    # Sort by timestamp (oldest first for proper time series)
-    if timestamps and z_values:
-        combined = list(zip(timestamps, z_values))
-        combined.sort(key=lambda x: x[0])
-        timestamps, z_values = zip(*combined)
-        timestamps, z_values = list(timestamps), list(z_values)
-    
-    # Limit to last 500 points for performance
-    if len(timestamps) > 500:
-        timestamps = timestamps[-500:]
-        z_values = z_values[-500:]
-    
-    return timestamps, z_values, f"Processed {files_processed} files with {len(timestamps)} data points"
+    return stats_dict
 
-@app.route('/chart-data')
-def get_chart_data():
-    """Get aggregated max_reading CSV data for the chart over 20 days."""
-    # Threshold constants
-    MAX_THRESHOLD = 0.6
-    MIN_THRESHOLD = -0.1
+def calculate_fft_analysis(values):
+    """
+    Calculate FFT and extract top 5 frequencies and amplitudes.
+    Returns frequencies in Hz and their corresponding amplitudes.
+    """
+    if not values or len(values) < 2:
+        return [], []
     
-    try:
-        # Load 20-day aggregated data
-        timestamps, z_values, status_msg = load_20_day_data()
-        
-        if not timestamps:
-            return jsonify({'error': 'No data available for the last 20 days'}), 404
-        
-        # Check for threshold violations in the aggregated data
-        max_violations = []
-        min_violations = []
-        
-        for timestamp, z_value in zip(timestamps, z_values):
-            if z_value >= MAX_THRESHOLD:
-                max_violations.append({'timestamp': timestamp, 'value': z_value})
-            if z_value <= MIN_THRESHOLD:
-                min_violations.append({'timestamp': timestamp, 'value': z_value})
-        
-        # Limit to last 500 points for performance
-        if len(timestamps) > 500:
-            timestamps = timestamps[-500:]
-            z_values = z_values[-500:]
-        
-        # Calculate statistical parameters
-        stats_data = calculate_statistics(z_values)
-        
-        return jsonify({
-            'filename': '20-day aggregated data',
-            'timestamps': timestamps,
-            'z_values': z_values,
-            'count': len(timestamps),
-            'max_threshold': MAX_THRESHOLD,
-            'min_threshold': MIN_THRESHOLD,
-            'max_violations': max_violations,
-            'min_violations': min_violations,
-            'max_violations_count': len(max_violations),
-            'min_violations_count': len(min_violations),
-            'statistics': stats_data
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    z_array = np.array(values)
+    
+    # Perform FFT
+    fft_result = np.fft.fft(z_array)
+    frequencies = np.fft.fftfreq(len(z_array), d=1.0/SAMPLING_RATE)
+    amplitudes = np.abs(fft_result)
+    
+    # Get only positive frequencies
+    positive_freq_idx = frequencies > 0
+    positive_freqs = frequencies[positive_freq_idx]
+    positive_amps = amplitudes[positive_freq_idx]
+    
+    if len(positive_amps) == 0:
+        return [], []
+    
+    # Get top 5
+    top_indices = np.argsort(positive_amps)[-5:][::-1]
+    
+    top_frequencies = [float(positive_freqs[i]) for i in top_indices if i < len(positive_freqs)]
+    top_amplitudes = [float(positive_amps[i]) for i in top_indices if i < len(positive_amps)]
+    
+    # Pad with zeros if less than 5
+    while len(top_frequencies) < 5:
+        top_frequencies.append(0.0)
+        top_amplitudes.append(0.0)
+    
+    return top_frequencies[:5], top_amplitudes[:5]
 
-@app.route('/parameter-data/<parameter>')
-def get_parameter_data(parameter):
-    """Get time-series data for a specific statistical parameter."""
-    try:
-        # Get optional date range and timestamp parameters
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        start_time = request.args.get('start_time')
-        end_time = request.args.get('end_time')
+def calculate_fft_full_spectrum(values):
+    """
+    Calculate full FFT spectrum for line graph visualization.
+    Returns frequencies in Hz and their corresponding amplitudes.
+    """
+    if not values or len(values) < 2:
+        return [], []
+    
+    z_array = np.array(values)
+    
+    # Perform FFT
+    fft_result = np.fft.fft(z_array)
+    frequencies = np.fft.fftfreq(len(z_array), d=1.0/SAMPLING_RATE)
+    amplitudes = np.abs(fft_result)
+    
+    # Get only positive frequencies
+    positive_freq_idx = frequencies > 0
+    positive_freqs = frequencies[positive_freq_idx]
+    positive_amps = amplitudes[positive_freq_idx]
+    
+    if len(positive_amps) == 0:
+        return [], []
+    
+    # Downsample to 500 points max for cleaner visualization
+    if len(positive_freqs) > 500:
+        step = len(positive_freqs) // 500
+        positive_freqs = positive_freqs[::step]
+        positive_amps = positive_amps[::step]
+    
+    return [float(f) for f in positive_freqs], [float(a) for a in positive_amps]
+
+def get_sensor_health_status(stats_dict):
+    """Determine health status based on statistics."""
+    if not stats_dict:
+        return 'unknown'
+    
+    # Health thresholds
+    kurtosis_critical = 5.0
+    std_dev_warning = 2.0
+    
+    kurtosis = stats_dict.get('kurtosis', 0)
+    std_dev = stats_dict.get('std_dev', 0)
+    
+    if kurtosis > kurtosis_critical:
+        return 'critical'
+    elif kurtosis > kurtosis_critical * 0.6 or std_dev > std_dev_warning:
+        return 'warning'
+    else:
+        return 'normal'
+
+def load_all_sensor_data_with_modes():
+    """
+    Load data from all 6 CSV files and calculate statistics/FFT for all three modes.
+    Returns: {sensor: {mode: {stats, frequencies, amplitudes, health, data_points}}}
+    """
+    sensor_data = {}
+    
+    for sensor in SENSORS:
+        sensor_data[sensor] = {}
         
-        # Load 20-day aggregated data
-        timestamps, z_values, status_msg = load_20_day_data()
+        # Load max and min files
+        max_timestamps, max_values = load_csv_data(f"max_{sensor}.csv")
+        min_timestamps, min_values = load_csv_data(f"min_{sensor}.csv")
         
-        if not timestamps:
-            return jsonify({'error': 'No data available for the last 20 days'}), 404
-        
-        # Filter by date range if provided
-        if start_date or end_date:
-            import datetime as dt
-            filtered_timestamps = []
-            filtered_z_values = []
+        # --- MAX MODE ---
+        if max_values:
+            max_stats = calculate_statistics(max_values)
+            max_frequencies, max_amplitudes = calculate_fft_analysis(max_values)
+            max_full_freqs, max_full_amps = calculate_fft_full_spectrum(max_values)
+            max_health = get_sensor_health_status(max_stats)
             
-            for i, timestamp in enumerate(timestamps):
-                # Convert timestamp (milliseconds) to datetime
-                dt_obj = dt.datetime.fromtimestamp(timestamp / 1000)
-                
-                # Check if within range
-                if start_date:
-                    start_dt = dt.datetime.fromisoformat(start_date)
-                    if dt_obj < start_dt:
-                        continue
-                
-                if end_date:
-                    end_dt = dt.datetime.fromisoformat(end_date)
-                    # Set to end of day
-                    end_dt = end_dt.replace(hour=23, minute=59, second=59)
-                    if dt_obj > end_dt:
-                        continue
-                
-                filtered_timestamps.append(timestamp)
-                filtered_z_values.append(z_values[i])
-            
-            timestamps = filtered_timestamps
-            z_values = filtered_z_values
-            
-            if not timestamps:
-                return jsonify({'error': 'No data available for the selected date range'}), 404
-        
-        # Filter by timestamp (full datetime) if provided
-        if start_time or end_time:
-            import datetime as dt
-            filtered_timestamps = []
-            filtered_z_values = []
-            
-            for i, timestamp in enumerate(timestamps):
-                # Convert timestamp (milliseconds) to datetime
-                dt_obj = dt.datetime.fromtimestamp(timestamp / 1000)
-                
-                # Check if within timestamp range (full datetime comparison)
-                if start_time:
-                    start_time_dt = dt.datetime.fromisoformat(start_time)
-                    if dt_obj < start_time_dt:
-                        continue
-                
-                if end_time:
-                    end_time_dt = dt.datetime.fromisoformat(end_time)
-                    if dt_obj > end_time_dt:
-                        continue
-                
-                filtered_timestamps.append(timestamp)
-                filtered_z_values.append(z_values[i])
-            
-            timestamps = filtered_timestamps
-            z_values = filtered_z_values
-            
-            if not timestamps:
-                return jsonify({'error': 'No data available for the selected time range'}), 404
-        
-        # Filter by time-of-day only (across all dates) if provided
-        time_start = request.args.get('time_start')
-        time_end = request.args.get('time_end')
-        
-        if time_start or time_end:
-            import datetime as dt
-            filtered_timestamps = []
-            filtered_z_values = []
-            
-            for i, timestamp in enumerate(timestamps):
-                # Convert timestamp (milliseconds) to datetime
-                dt_obj = dt.datetime.fromtimestamp(timestamp / 1000)
-                dt_time = dt_obj.time()
-                
-                # Check if within time-of-day range
-                if time_start:
-                    start_t = dt.datetime.strptime(time_start, '%H:%M').time()
-                    if dt_time < start_t:
-                        continue
-                
-                if time_end:
-                    end_t = dt.datetime.strptime(time_end, '%H:%M').time()
-                    if dt_time > end_t:
-                        continue
-                
-                filtered_timestamps.append(timestamp)
-                filtered_z_values.append(z_values[i])
-            
-            timestamps = filtered_timestamps
-            z_values = filtered_z_values
-            
-            if not timestamps:
-                return jsonify({'error': 'No data available for the selected time range'}), 404
-        
-        # Calculate statistical parameters
-        stats_data = calculate_statistics(z_values)
-        
-        # Get the requested parameter values
-        if parameter == 'raw_z':
-            parameter_values = z_values
-            parameter_label = 'Z-Axis Value'
-        elif parameter in stats_data:
-            # For statistical parameters, calculate rolling statistics over a window
-            # This shows how the parameter evolves over the 20-day period
-            window_size = min(7, len(z_values))  # 7-day rolling window or available data
-            parameter_values = []
-            
-            for i in range(len(z_values)):
-                # Calculate rolling window
-                start_idx = max(0, i - window_size + 1)
-                window_data = z_values[start_idx:i+1]
-                
-                # Calculate statistic for this window
-                if len(window_data) > 0:
-                    window_stats = calculate_statistics(window_data)
-                    if parameter in window_stats:
-                        parameter_values.append(window_stats[parameter])
-                    else:
-                        parameter_values.append(0)
-                else:
-                    parameter_values.append(0)
-            
-            parameter_label = parameter.replace('_', ' ').title()
-            
-            # Improve label formatting
-            label_map = {
-                'max': 'Maximum',
-                'min': 'Minimum', 
-                'mean': 'Mean',
-                'abs_mean': 'Absolute Mean',
-                'rms': 'RMS (Root Mean Square)',
-                'variance': 'Variance',
-                'std_dev': 'Standard Deviation',
-                'peak': 'Peak',
-                'peak_to_peak': 'Peak-to-Peak',
-                'crest_factor': 'Crest Factor',
-                'impulse_factor': 'Impulse Factor',
-                'shape_factor': 'Shape Factor',
-                'clearance_factor': 'Clearance Factor',
-                'skewness': 'Skewness',
-                'kurtosis': 'Kurtosis',
-                'excess_kurtosis': 'Excess Kurtosis',
-                'energy': 'Energy',
-                'zero_crossing_rate': 'Zero-Crossing Rate',
-                'percentile_90': '90th Percentile',
-                'percentile_95': '95th Percentile',
-                'percentile_99': '99th Percentile'
+            sensor_data[sensor]['max'] = {
+                'stats': max_stats,
+                'frequencies': max_frequencies,
+                'amplitudes': max_amplitudes,
+                'full_spectrum_freqs': max_full_freqs,
+                'full_spectrum_amps': max_full_amps,
+                'health': max_health,
+                'data_points': len(max_values)
             }
-            parameter_label = label_map.get(parameter, parameter_label)
         else:
-            return jsonify({'error': f'Unknown parameter: {parameter}'}), 400
+            sensor_data[sensor]['max'] = {
+                'stats': {}, 'frequencies': [], 'amplitudes': [],
+                'full_spectrum_freqs': [], 'full_spectrum_amps': [],
+                'health': 'unknown', 'data_points': 0
+            }
+        
+        # --- MIN MODE ---
+        if min_values:
+            min_stats = calculate_statistics(min_values)
+            min_frequencies, min_amplitudes = calculate_fft_analysis(min_values)
+            min_full_freqs, min_full_amps = calculate_fft_full_spectrum(min_values)
+            min_health = get_sensor_health_status(min_stats)
+            
+            sensor_data[sensor]['min'] = {
+                'stats': min_stats,
+                'frequencies': min_frequencies,
+                'amplitudes': min_amplitudes,
+                'full_spectrum_freqs': min_full_freqs,
+                'full_spectrum_amps': min_full_amps,
+                'health': min_health,
+                'data_points': len(min_values)
+            }
+        else:
+            sensor_data[sensor]['min'] = {
+                'stats': {}, 'frequencies': [], 'amplitudes': [],
+                'full_spectrum_freqs': [], 'full_spectrum_amps': [],
+                'health': 'unknown', 'data_points': 0
+            }
+        
+        # --- COMBINED MODE ---
+        if max_values and min_values:
+            merged_timestamps, merged_values = merge_max_min_files(
+                max_timestamps, max_values, min_timestamps, min_values
+            )
+            
+            combined_stats = calculate_statistics(merged_values)
+            combined_frequencies, combined_amplitudes = calculate_fft_analysis(merged_values)
+            combined_full_freqs, combined_full_amps = calculate_fft_full_spectrum(merged_values)
+            combined_health = get_sensor_health_status(combined_stats)
+            
+            sensor_data[sensor]['combined'] = {
+                'stats': combined_stats,
+                'frequencies': combined_frequencies,
+                'amplitudes': combined_amplitudes,
+                'full_spectrum_freqs': combined_full_freqs,
+                'full_spectrum_amps': combined_full_amps,
+                'health': combined_health,
+                'data_points': len(merged_values)
+            }
+        else:
+            sensor_data[sensor]['combined'] = {
+                'stats': {}, 'frequencies': [], 'amplitudes': [],
+                'full_spectrum_freqs': [], 'full_spectrum_amps': [],
+                'health': 'unknown', 'data_points': 0
+            }
+    
+    return sensor_data
+
+@app.route('/api/sensor-data')
+def get_sensor_data():
+    """Get all sensor data for all three modes."""
+    try:
+        mode = request.args.get('mode', 'max').lower()
+        
+        if mode not in ['max', 'min', 'combined']:
+            return jsonify({'status': 'error', 'message': f'Invalid mode: {mode}'}), 400
+        
+        sensor_data = load_all_sensor_data_with_modes()
+        
+        # Filter data for requested mode
+        filtered_data = {}
+        for sensor_name, modes in sensor_data.items():
+            if mode in modes:
+                filtered_data[sensor_name] = modes[mode]
         
         return jsonify({
-            'filename': '20-day aggregated data',
-            'timestamps': timestamps,
-            'parameter_values': parameter_values,
-            'parameter_name': parameter,
-            'parameter_label': parameter_label,
-            'count': len(timestamps),
-            'statistics': stats_data,
-            'status': status_msg
+            'status': 'success',
+            'mode': mode,
+            'data': filtered_data,
+            'timestamp': dt.datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/sensor/<sensor_name>')
+def get_sensor_detail(sensor_name):
+    """Get detailed data for a specific sensor in all modes."""
+    if sensor_name not in SENSORS:
+        return jsonify({'error': 'Invalid sensor'}), 400
+    
+    try:
+        sensor_data = load_all_sensor_data_with_modes()
+        data = sensor_data.get(sensor_name, {})
+        
+        return jsonify({
+            'sensor': sensor_name,
+            'max': data.get('max', {}),
+            'min': data.get('min', {}),
+            'combined': data.get('combined', {})
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/create-event', methods=['POST'])
-def create_event():
-    """Create a new failure event with slope tracking."""
+@app.route('/api/files')
+def get_files():
+    """List all CSV files in Data directory."""
+    files = []
     try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        event_name = data.get('event_name')
-        failure_time_iso = data.get('failure_time_iso')
-        description = data.get('description', '')
-        
-        if not event_name or not failure_time_iso:
-            return jsonify({'error': 'event_name and failure_time_iso are required'}), 400
-        
-        result = event_manager.create_event(event_name, failure_time_iso, description)
-        return jsonify(result), 201
-        
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        for filepath in glob.glob(os.path.join(DATA_DIR, '*.csv')):
+            stat = os.stat(filepath)
+            files.append({
+                'name': os.path.basename(filepath),
+                'size': stat.st_size,
+                'modified': dt.datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
+        return jsonify(files)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/events')
-def list_events():
-    """List all logged events with metadata."""
+@app.route('/api/upload', methods=['POST'])
+def upload_files():
+    """
+    Secure endpoint for remote servers to upload sensor CSV files.
+    
+    Expected:
+    - API Key in header: X-API-Key
+    - 2 files: max_<sensor>.csv and min_<sensor>.csv
+    
+    Returns validation report and upload timestamp.
+    """
     try:
-        events = event_manager.list_events()
+        # 1. AUTHENTICATION
+        api_key = request.headers.get('X-API-Key')
+        if not api_key:
+            logger.warning('Upload attempt without API key')
+            return jsonify({'status': 'error', 'message': 'Missing API key'}), 401
+        
+        if api_key not in UPLOAD_API_KEYS.values():
+            logger.warning(f'Upload attempt with invalid API key: {api_key[:10]}...')
+            return jsonify({'status': 'error', 'message': 'Invalid API key'}), 403
+        
+        sensor_id = [k for k, v in UPLOAD_API_KEYS.items() if v == api_key][0]
+        
+        # 2. FILE VALIDATION
+        if 'files' not in request.files:
+            logger.warning(f'Upload attempt from {sensor_id} with no files')
+            return jsonify({'error': 'No files provided'}), 400
+        
+        uploaded_files = request.files.getlist('files')
+        if len(uploaded_files) != UPLOAD_BATCH_SIZE:
+            logger.warning(f'Upload from {sensor_id}: Expected {UPLOAD_BATCH_SIZE} files, got {len(uploaded_files)}')
+            return jsonify({
+                'error': f'Expected {UPLOAD_BATCH_SIZE} files, got {len(uploaded_files)}'
+            }), 400
+        
+        saved_files = []
+        validation_report = []
+        upload_timestamp = dt.datetime.now().isoformat()
+        
+        for file in uploaded_files:
+            if not file or not file.filename.endswith('.csv'):
+                return jsonify({'error': f'Invalid file format: {file.filename}'}), 400
+            
+            # Validate filename format
+            if not validate_filename(file.filename):
+                return jsonify({'error': f'Invalid filename format: {file.filename}'}), 400
+            
+            # Check file size
+            file.seek(0, os.SEEK_END)
+            file_size = file.tell()
+            file.seek(0)
+            
+            if file_size > MAX_FILE_SIZE:
+                return jsonify({'error': f'File too large: {file.filename}'}), 413
+            
+            # Validate CSV content
+            validation_result = validate_csv_file(file)
+            if not validation_result['valid']:
+                logger.warning(f'Invalid CSV from {sensor_id}: {file.filename} - {validation_result["error"]}')
+                return jsonify({
+                    'error': f'Invalid CSV format: {validation_result["error"]}'
+                }), 400
+            
+            # Save file
+            try:
+                filepath = os.path.join(DATA_DIR, file.filename)
+                file.seek(0)
+                file.save(filepath)
+                saved_files.append(file.filename)
+                
+                validation_report.append({
+                    'file': file.filename,
+                    'rows': validation_result['row_count'],
+                    'size_kb': round(file_size / 1024, 2),
+                    'status': 'success'
+                })
+                
+                logger.info(f'Successfully saved {file.filename} from {sensor_id} ({validation_result["row_count"]} rows)')
+            except Exception as e:
+                logger.error(f'Failed to save {file.filename}: {str(e)}')
+                return jsonify({'error': f'Failed to save file: {str(e)}'}), 500
+        
+        # 3. LOG UPLOAD EVENT
+        log_upload_event(sensor_id, saved_files, upload_timestamp)
+        
         return jsonify({
-            'events': events,
-            'count': len(events)
+            'status': 'success',
+            'message': f'Uploaded {len(saved_files)} file(s)',
+            'sensor_id': sensor_id,
+            'files': saved_files,
+            'timestamp': upload_timestamp,
+            'validation_report': validation_report,
+            'next_expected_upload': (dt.datetime.now() + dt.timedelta(minutes=120)).isoformat()
+        }), 201
+        
+    except Exception as e:
+        logger.error(f'Upload endpoint error: {str(e)}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def validate_filename(filename):
+    """Validate CSV filename follows expected pattern: max_<sensor>.csv or min_<sensor>.csv"""
+    valid_patterns = [f'{ftype}_{sensor}.csv' for ftype in ['max', 'min'] for sensor in SENSORS]
+    return filename in valid_patterns
+
+def validate_csv_file(file):
+    """Validate CSV file format and content."""
+    try:
+        file.seek(0)
+        content = file.read().decode('utf-8')
+        
+        if not content.strip():
+            return {'valid': False, 'error': 'Empty file'}
+        
+        lines = content.strip().split('\n')
+        if len(lines) < 2:
+            return {'valid': False, 'error': 'No data rows'}
+        
+        # Check header
+        header = lines[0].split(',')
+        if 'timestamp' not in header or 'value' not in header:
+            return {'valid': False, 'error': 'Missing required columns: timestamp, value'}
+        
+        # Check data rows
+        row_count = 0
+        for line in lines[1:]:
+            if line.strip():
+                parts = line.split(',')
+                if len(parts) < 2:
+                    return {'valid': False, 'error': f'Invalid data row: {line[:50]}...'}
+                row_count += 1
+        
+        if row_count == 0:
+            return {'valid': False, 'error': 'No valid data rows'}
+        
+        if row_count > MAX_CSV_ROWS:
+            return {'valid': False, 'error': f'Too many rows: {row_count} (max: {MAX_CSV_ROWS})'}
+        
+        file.seek(0)
+        return {'valid': True, 'row_count': row_count}
+        
+    except Exception as e:
+        return {'valid': False, 'error': str(e)}
+
+def log_upload_event(sensor_id, files, timestamp):
+    """Log upload event to tracking file."""
+    try:
+        log_file = os.path.join(UPLOAD_LOG_DIR, 'upload_history.log')
+        with open(log_file, 'a') as f:
+            log_entry = {
+                'timestamp': timestamp,
+                'sensor_id': sensor_id,
+                'files': files,
+                'file_count': len(files)
+            }
+            f.write(f"{log_entry}\n")
+    except Exception as e:
+        logger.error(f'Failed to log upload event: {str(e)}')
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint."""
+    return jsonify({'status': 'ok'}), 200
+
+@app.route('/api/upload/status')
+def upload_status():
+    """Get upload history and monitoring dashboard."""
+    try:
+        log_file = os.path.join(UPLOAD_LOG_DIR, 'upload_history.log')
+        upload_history = []
+        
+        if os.path.exists(log_file):
+            with open(log_file, 'r') as f:
+                for line in f.readlines()[-50:]:  # Last 50 uploads
+                    try:
+                        upload_history.append(eval(line.strip()))
+                    except:
+                        pass
+        
+        # Calculate upload frequency stats
+        sensor_stats = {}
+        for entry in upload_history:
+            sensor_id = entry.get('sensor_id')
+            if sensor_id not in sensor_stats:
+                sensor_stats[sensor_id] = {'count': 0, 'last_upload': None}
+            sensor_stats[sensor_id]['count'] += 1
+            sensor_stats[sensor_id]['last_upload'] = entry.get('timestamp')
+        
+        return jsonify({
+            'status': 'success',
+            'total_uploads': len(upload_history),
+            'sensor_stats': sensor_stats,
+            'recent_uploads': upload_history[-10:] if upload_history else []
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/event/<event_id>')
-def get_event(event_id):
-    """Get detailed data for a specific event."""
-    try:
-        event_data = event_manager.get_event(event_id)
-        
-        if event_data is None:
-            return jsonify({'error': 'Event not found'}), 404
-        
-        return jsonify(event_data)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/event-names')
-def get_event_names():
-    """Get list of unique event names for dropdown."""
-    try:
-        event_names = event_manager.get_unique_event_names()
-        return jsonify({
-            'event_names': event_names,
-            'count': len(event_names)
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/download-event/<event_id>')
-def download_event(event_id):
-    """Download the generated CSV file for a specific event."""
-    try:
-        filename = f"{event_id}.csv"
-        file_path = os.path.join(EVENTS_DIR, filename)
-        
-        if not os.path.exists(file_path):
-            return jsonify({'error': 'Event file not found'}), 404
-            
-        return send_from_directory(EVENTS_DIR, filename, as_attachment=True, mimetype='text/csv')
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/download-source/<event_id>')
-def download_source(event_id):
-    """Download the archived source CSV file for a specific event."""
-    try:
-        # First we need to find the filename from metadata
-        json_path = os.path.join(EVENTS_DIR, f"{event_id}.json")
-        if not os.path.exists(json_path):
-            return jsonify({'error': 'Event metadata not found'}), 404
-            
-        with open(json_path, 'r', encoding='utf-8') as f:
-            metadata = json.load(f)
-            
-        archived_filename = metadata.get('archived_source_filename')
-        if not archived_filename:
-            return jsonify({'error': 'Source file info not found in metadata'}), 404
-            
-        file_path = os.path.join(EVENTS_DIR, archived_filename)
-        if not os.path.exists(file_path):
-            return jsonify({'error': 'Archived source file not found'}), 404
-            
-        return send_from_directory(EVENTS_DIR, archived_filename, as_attachment=True, mimetype='text/csv')
-    except Exception as e:
+        logger.error(f'Error getting upload status: {str(e)}')
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Set up the file system observer
-    observer = Observer()
-    event_handler = FileChangeHandler()
-    observer.schedule(event_handler, DATA_DIR, recursive=False)
-    observer.start()
-
-    try:
-        # Run the Flask app on all network interfaces
-        print(' * Starting Flask application...')
-        socketio.run(app, host='0.0.0.0', port=5001, debug=True, allow_unsafe_werkzeug=True)
-    finally:
-        observer.stop()
-        observer.join()
+    print(' * Starting Predictive Maintenance Backend...')
+    from flask_socketio import SocketIO
+    
+    # Get port from environment variable or default to 5001
+    port = int(os.environ.get('PORT', 5001))
+    debug_mode = os.environ.get('FLASK_ENV', 'development') == 'development'
+    
+    socketio = SocketIO(
+        app,
+        cors_allowed_origins=ALLOWED_ORIGINS,
+        async_mode='threading'
+    )
+    socketio.run(
+        app,
+        host='0.0.0.0',
+        port=port,
+        debug=debug_mode,
+        allow_unsafe_werkzeug=True
+    )

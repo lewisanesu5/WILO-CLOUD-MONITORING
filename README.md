@@ -1,4 +1,38 @@
-# Wilo Cloud Monitoring Service
+# Predictive Maintenance System
+
+Real-time sensor monitoring with FFT analysis and secure remote data upload.
+
+## 🚀 Deploy to Cloud (Free) - 5 Minutes
+
+👉 **[See DEPLOY_TO_RENDER.md for complete deployment guide](DEPLOY_TO_RENDER.md)**
+
+Quick summary:
+1. Push to GitHub
+2. Connect to Render.com (free account)
+3. Add your Namify domain
+4. Done! ✅
+
+## 📚 Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [**DEPLOY_TO_RENDER.md**](DEPLOY_TO_RENDER.md) | **Deploy to cloud in 5 min** ⭐ |
+| [UPLOAD_ARCHITECTURE.md](UPLOAD_ARCHITECTURE.md) | Upload system design (15+ pages) |
+| [CLIENT_SETUP_GUIDE.md](CLIENT_SETUP_GUIDE.md) | Client deployment guide (10+ pages) |
+| [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | One-page reference |
+
+## 🎯 Features
+
+- **Real-time Monitoring**: 3 sensor types (acceleration, current, audio)
+- **FFT Analysis**: Full spectrum line graph + top 5 frequencies
+- **Three View Modes**: MAX, MIN, COMBINED sensor data
+- **Secure Upload**: API key authentication for remote sensors
+- **Health Monitoring**: Automatic status detection (normal/warning/critical)
+- **Web Dashboard**: React + TailwindCSS + Chart.js
+
+## 💻 Quick Start (Local Development)
+
+### Wilo Cloud Monitoring Service
 
 A real-time cloud monitoring dashboard for sensor data analysis with comprehensive statistical parameter calculation and visualization.
 

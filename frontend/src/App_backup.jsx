@@ -1,38 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Line, Bar } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js';
 import './index.css';
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler
-);
 
 const API_BASE_URL = 'http://localhost:5001';
 const SENSORS = ['acceleration', 'current', 'audio'];
-const MODES = [
-  { value: 'max', label: 'MAX View' },
-  { value: 'min', label: 'MIN View' },
-  { value: 'combined', label: 'COMBINED View' }
-];
 
 // Health status color mapping
 const HEALTH_COLORS = {
@@ -78,7 +48,7 @@ function SensorCard({ sensor, data }) {
   );
 }
 
-function StatisticsTable({ sensorData, mode }) {
+function StatisticsTable({ sensorData }) {
   const parameters = [
     { key: 'mean', label: 'Mean' },
     { key: 'max', label: 'Max' },
@@ -91,8 +61,7 @@ function StatisticsTable({ sensorData, mode }) {
   
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 mt-8">
-      <h2 className="text-2xl font-bold mb-2">Statistical Analysis</h2>
-      <p className="text-gray-600 mb-4 text-sm">View Mode: <span className="font-semibold uppercase">{mode}</span></p>
+      <h2 className="text-2xl font-bold mb-4">Statistical Analysis</h2>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead className="bg-gray-100 border-b-2 border-gray-300">
@@ -121,141 +90,41 @@ function StatisticsTable({ sensorData, mode }) {
   );
 }
 
-function FFTLineChart({ sensor, frequencies, amplitudes }) {
-  if (!frequencies || frequencies.length === 0 || !amplitudes || amplitudes.length === 0) {
+function FrequencyChart({ sensor, frequencies, amplitudes }) {
+  if (!frequencies || frequencies.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-lg p-6">
-        <h3 className="font-semibold capitalize mb-4">{sensor} - FFT Spectrum</h3>
-        <p className="text-gray-500">No FFT data available</p>
+        <h3 className="font-semibold capitalize mb-4">{sensor} - Frequencies</h3>
+        <p className="text-gray-500">No frequency data available</p>
       </div>
     );
   }
 
-  const chartData = {
-    labels: frequencies.map(f => f.toFixed(1)),
-    datasets: [
-      {
-        label: `${sensor} Frequency Spectrum`,
-        data: amplitudes,
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        fill: true,
-        tension: 0.4,
-        pointRadius: 2,
-        pointBackgroundColor: '#3b82f6',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 1,
-        pointHoverRadius: 4
-      }
-    ]
-  };
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: {
-        display: true,
-        labels: {
-          usePointStyle: true,
-          padding: 15
-        }
-      },
-      tooltip: {
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        padding: 12,
-        titleFont: { size: 14 }
-      }
-    },
-    scales: {
-      x: {
-        title: {
-          display: true,
-          text: 'Frequency (Hz)',
-          font: { size: 12, weight: 'bold' }
-        },
-        ticks: {
-          maxTicksLimit: 20
-        }
-      },
-      y: {
-        title: {
-          display: true,
-          text: 'Amplitude',
-          font: { size: 12, weight: 'bold' }
-        }
-      }
-    }
-  };
+  // Calculate max amplitude for scaling
+  const maxAmp = Math.max(...amplitudes, 1);
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
-      <h3 className="font-semibold capitalize mb-4">{sensor} - Full FFT Spectrum</h3>
-      <div style={{ height: '300px' }}>
-        <Line data={chartData} options={options} />
-      </div>
-    </div>
-  );
-}
-
-function TopFrequenciesChart({ sensor, frequencies, amplitudes }) {
-  if (!frequencies || frequencies.length === 0 || !amplitudes || amplitudes.length === 0) {
-    return null;
-  }
-
-  const chartData = {
-    labels: frequencies.map((f, idx) => `${(idx + 1)}`),
-    datasets: [
-      {
-        label: 'Top 5 Frequencies',
-        data: amplitudes,
-        backgroundColor: ['#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe'],
-        borderColor: '#3b82f6',
-        borderWidth: 1,
-        borderRadius: 4
-      }
-    ]
-  };
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: {
-        display: false
-      }
-    },
-    scales: {
-      x: {
-        title: {
-          display: true,
-          text: 'Frequency Rank',
-          font: { size: 12, weight: 'bold' }
-        }
-      },
-      y: {
-        title: {
-          display: true,
-          text: 'Amplitude',
-          font: { size: 12, weight: 'bold' }
-        }
-      }
-    }
-  };
-
-  return (
-    <div className="bg-gray-100 rounded-lg p-4 mt-4">
-      <h4 className="font-semibold text-sm mb-3">Top 5 Peak Frequencies</h4>
-      <div className="grid grid-cols-5 gap-2 mb-4">
+      <h3 className="font-semibold capitalize mb-4">{sensor} - Top 5 Frequencies</h3>
+      <div className="space-y-3">
         {frequencies.map((freq, idx) => (
-          <div key={idx} className="text-center">
-            <p className="text-xs font-semibold text-gray-700">{freq.toFixed(1)} Hz</p>
-            <p className="text-xs text-gray-600">Amp: {amplitudes[idx]?.toFixed(2)}</p>
+          <div key={idx} className="flex items-center gap-4">
+            <div className="w-24">
+              <p className="text-sm font-medium">{freq.toFixed(2)} Hz</p>
+            </div>
+            <div className="flex-1 bg-gray-200 rounded-full h-8 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-blue-400 to-blue-600 h-full flex items-center justify-end pr-2"
+                style={{ width: `${(amplitudes[idx] / maxAmp) * 100}%` }}
+              >
+                {(amplitudes[idx] / maxAmp) * 100 > 15 && (
+                  <span className="text-white text-xs font-semibold">{amplitudes[idx].toFixed(2)}</span>
+                )}
+              </div>
+            </div>
+            <div className="w-20 text-right text-sm text-gray-600">{amplitudes[idx].toFixed(2)}</div>
           </div>
         ))}
-      </div>
-      <div style={{ height: '150px' }}>
-        <Bar data={chartData} options={options} />
       </div>
     </div>
   );
@@ -263,16 +132,15 @@ function TopFrequenciesChart({ sensor, frequencies, amplitudes }) {
 
 function App() {
   const [sensorData, setSensorData] = useState({});
-  const [mode, setMode] = useState('max');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  const fetchSensorData = async (selectedMode = 'max') => {
+  const fetchSensorData = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/api/sensor-data?mode=${selectedMode}`);
+      const response = await fetch(`${API_BASE_URL}/api/sensor-data`);
       if (!response.ok) throw new Error('Failed to fetch sensor data');
       
       const result = await response.json();
@@ -287,25 +155,14 @@ function App() {
     }
   };
 
-  // Fetch data when mode changes
   useEffect(() => {
-    fetchSensorData(mode);
-  }, [mode]);
-
-  // Auto-refresh interval
-  useEffect(() => {
+    fetchSensorData();
+    
     if (autoRefresh) {
-      const interval = setInterval(() => {
-        fetchSensorData(mode);
-      }, 5000);
+      const interval = setInterval(fetchSensorData, 5000); // Refresh every 5 seconds
       return () => clearInterval(interval);
     }
-  }, [autoRefresh, mode]);
-
-  const handleModeChange = (e) => {
-    const newMode = e.target.value;
-    setMode(newMode);
-  };
+  }, [autoRefresh]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-8">
@@ -314,12 +171,12 @@ function App() {
         <div className="flex justify-between items-start mb-6">
           <div>
             <h1 className="text-4xl font-bold text-white mb-2">Predictive Maintenance</h1>
-            <p className="text-gray-400">Real-time sensor monitoring and FFT analysis</p>
+            <p className="text-gray-400">Real-time sensor monitoring and analysis</p>
           </div>
           <div className="text-right">
             <p className="text-gray-400 text-sm">Last updated: <span className="text-green-400 font-semibold">{lastUpdate || 'Never'}</span></p>
             <button
-              onClick={() => fetchSensorData(mode)}
+              onClick={fetchSensorData}
               className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
             >
               🔄 Refresh Now
@@ -328,22 +185,7 @@ function App() {
         </div>
 
         {/* Controls */}
-        <div className="flex gap-6 items-center">
-          <div className="flex items-center gap-3">
-            <label className="text-white font-semibold">View Mode:</label>
-            <select
-              value={mode}
-              onChange={handleModeChange}
-              className="bg-gray-700 text-white border-2 border-gray-600 rounded-lg px-4 py-2 font-semibold hover:border-blue-500 transition cursor-pointer"
-            >
-              {MODES.map(m => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          
+        <div className="flex gap-4">
           <label className="flex items-center gap-2 text-white cursor-pointer">
             <input
               type="checkbox"
@@ -365,7 +207,7 @@ function App() {
 
       {loading && Object.keys(sensorData).length === 0 ? (
         <div className="max-w-7xl mx-auto text-center text-gray-400">
-          <p className="text-lg">Loading sensor data for {mode.toUpperCase()} mode...</p>
+          <p className="text-lg">Loading sensor data...</p>
         </div>
       ) : (
         <>
@@ -382,36 +224,30 @@ function App() {
 
           {/* Statistics Table */}
           <div className="max-w-7xl mx-auto">
-            <StatisticsTable sensorData={sensorData} mode={mode} />
+            <StatisticsTable sensorData={sensorData} />
           </div>
 
-          {/* Full FFT Spectrum Line Graphs */}
-          <div className="max-w-7xl mx-auto grid grid-cols-1 gap-8 mt-8 mb-8">
+          {/* Frequency Spectrum Charts */}
+          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 mt-8 mb-8">
             {SENSORS.map(sensor => (
-              <div key={`fft-${sensor}`}>
-                <FFTLineChart
-                  sensor={sensor}
-                  frequencies={sensorData[sensor]?.full_spectrum_freqs || []}
-                  amplitudes={sensorData[sensor]?.full_spectrum_amps || []}
-                />
-                <TopFrequenciesChart
-                  sensor={sensor}
-                  frequencies={sensorData[sensor]?.frequencies || []}
-                  amplitudes={sensorData[sensor]?.amplitudes || []}
-                />
-              </div>
+              <FrequencyChart
+                key={`freq-${sensor}`}
+                sensor={sensor}
+                frequencies={sensorData[sensor]?.frequencies || []}
+                amplitudes={sensorData[sensor]?.amplitudes || []}
+              />
             ))}
           </div>
 
           {/* Data Points Info */}
           <div className="max-w-7xl mx-auto bg-gray-800 rounded-lg p-6 text-gray-300">
-            <h3 className="text-lg font-semibold mb-4">Data Summary ({mode.toUpperCase()} Mode)</h3>
+            <h3 className="text-lg font-semibold mb-4">Data Summary</h3>
             <div className="grid grid-cols-3 gap-6">
               {SENSORS.map(sensor => (
                 <div key={`info-${sensor}`}>
                   <p className="text-sm text-gray-400 capitalize">{sensor}</p>
                   <p className="text-2xl font-bold text-blue-400">{sensorData[sensor]?.data_points || 0}</p>
-                  <p className="text-xs text-gray-500">data points analyzed</p>
+                  <p className="text-xs text-gray-500">data points collected</p>
                 </div>
               ))}
             </div>
