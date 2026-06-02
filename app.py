@@ -9,6 +9,10 @@ import datetime as dt
 import logging
 from functools import wraps
 import hashlib
+from dotenv import load_dotenv
+from database import save_statistics, test_connection
+
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -30,6 +34,13 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Test database connection on startup
+try:
+    if test_connection():
+        logger.info("Connected to Neon database successfully")
+except Exception as e:
+    logger.warning(f"Database connection not available: {e}")
 
 # Configure directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -223,6 +234,7 @@ def load_all_sensor_data_with_modes():
     """
     Load data from all 6 CSV files and calculate statistics/FFT for all three modes.
     Returns: {sensor: {mode: {stats, frequencies, amplitudes, health, data_points}}}
+    Also saves statistics to Neon database.
     """
     sensor_data = {}
     
@@ -249,6 +261,12 @@ def load_all_sensor_data_with_modes():
                 'health': max_health,
                 'data_points': len(max_values)
             }
+            
+            # Save MAX statistics to database
+            try:
+                save_statistics(sensor, 'max', max_stats, max_frequencies, max_amplitudes)
+            except Exception as e:
+                logger.error(f"Failed to save {sensor} (max) statistics to database: {e}")
         else:
             sensor_data[sensor]['max'] = {
                 'stats': {}, 'frequencies': [], 'amplitudes': [],
@@ -272,6 +290,12 @@ def load_all_sensor_data_with_modes():
                 'health': min_health,
                 'data_points': len(min_values)
             }
+            
+            # Save MIN statistics to database
+            try:
+                save_statistics(sensor, 'min', min_stats, min_frequencies, min_amplitudes)
+            except Exception as e:
+                logger.error(f"Failed to save {sensor} (min) statistics to database: {e}")
         else:
             sensor_data[sensor]['min'] = {
                 'stats': {}, 'frequencies': [], 'amplitudes': [],
@@ -299,6 +323,12 @@ def load_all_sensor_data_with_modes():
                 'health': combined_health,
                 'data_points': len(merged_values)
             }
+            
+            # Save COMBINED statistics to database
+            try:
+                save_statistics(sensor, 'combined', combined_stats, combined_frequencies, combined_amplitudes)
+            except Exception as e:
+                logger.error(f"Failed to save {sensor} (combined) statistics to database: {e}")
         else:
             sensor_data[sensor]['combined'] = {
                 'stats': {}, 'frequencies': [], 'amplitudes': [],

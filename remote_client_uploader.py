@@ -13,7 +13,7 @@ import schedule
 import json
 
 # Configuration
-SERVER_URL = 'http://your-server-ip:5001'  # Change to your server
+SERVER_URL = 'https://wilo-cloud-monitoring.onrender.com'  # Change to your server
 API_KEY = 'sk_prod_7f3b8e2a9c1d4f6e5a2b9c8d7e1f3a5b'  # Use your assigned API key
 SENSOR_ID = 'sensor-001'
 LOCAL_DATA_DIR = './sensor_data'  # Where max/min files are generated locally
