@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import './index.css';
 
-const API_BASE_URL = 'http://localhost:5001';
+const API_BASE_URL = 'https://wilo-cloud-monitoring.onrender.com';
 const SENSORS = ['acceleration', 'current', 'audio'];
 
 // Health status color mapping

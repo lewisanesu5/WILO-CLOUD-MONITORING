@@ -28,7 +28,7 @@ ChartJS.register(
 const INTERVAL_SECONDS = 300;
 const MAX_THRESHOLD = 0.6;
 const MIN_THRESHOLD = -0.1;
-const API_BASE_URL = 'http://localhost:5001';
+const API_BASE_URL = 'https://wilo-cloud-monitoring.onrender.com';
 
 // Parameter options for each chart
 const BASIC_STATS_OPTIONS = [

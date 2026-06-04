@@ -3,6 +3,7 @@ from psycopg2.extras import RealDictCursor
 import os
 from dotenv import load_dotenv
 import logging
+import time
 
 load_dotenv()
 
@@ -33,9 +34,12 @@ def save_statistics(sensor_name, mode, stats_dict, frequencies, amplitudes):
         frequencies: List of top 5 frequencies
         amplitudes: List of top 5 amplitudes
     """
+    start_time = time.time()
     conn = None
     try:
         conn = get_connection()
+        connection_time = time.time() - start_time
+        
         cur = conn.cursor()
         
         # Map sensor_name to table name
@@ -60,6 +64,7 @@ def save_statistics(sensor_name, mode, stats_dict, frequencies, amplitudes):
                     %s, %s, %s, %s, %s)
         """
         
+        query_start = time.time()
         cur.execute(query, (
             stats_dict.get('min', 0),           # x_min
             stats_dict.get('max', 0),           # x_max
@@ -70,9 +75,20 @@ def save_statistics(sensor_name, mode, stats_dict, frequencies, amplitudes):
             freqs[0], freqs[1], freqs[2], freqs[3], freqs[4],  # frequency1-5
             amps[0], amps[1], amps[2], amps[3], amps[4]        # amplitude1-5
         ))
+        query_time = time.time() - query_start
         
+        commit_start = time.time()
         conn.commit()
-        logger.info(f"Saved {mode} statistics for {sensor_name} to database")
+        commit_time = time.time() - commit_start
+        
+        total_time = time.time() - start_time
+        logger.info(
+            f"✓ {sensor_name} ({mode}): "
+            f"connection={connection_time*1000:.1f}ms, "
+            f"query={query_time*1000:.1f}ms, "
+            f"commit={commit_time*1000:.1f}ms, "
+            f"total={total_time*1000:.1f}ms"
+        )
         return True
         
     except ValueError as e:

@@ -9,6 +9,7 @@ import datetime as dt
 import logging
 from functools import wraps
 import hashlib
+import time
 from dotenv import load_dotenv
 from database import save_statistics, test_connection
 
@@ -236,6 +237,8 @@ def load_all_sensor_data_with_modes():
     Returns: {sensor: {mode: {stats, frequencies, amplitudes, health, data_points}}}
     Also saves statistics to Neon database.
     """
+    load_start = time.time()
+    save_times = {'max': 0, 'min': 0, 'combined': 0}
     sensor_data = {}
     
     for sensor in SENSORS:
@@ -264,7 +267,9 @@ def load_all_sensor_data_with_modes():
             
             # Save MAX statistics to database
             try:
+                save_start = time.time()
                 save_statistics(sensor, 'max', max_stats, max_frequencies, max_amplitudes)
+                save_times['max'] += time.time() - save_start
             except Exception as e:
                 logger.error(f"Failed to save {sensor} (max) statistics to database: {e}")
         else:
@@ -293,7 +298,9 @@ def load_all_sensor_data_with_modes():
             
             # Save MIN statistics to database
             try:
+                save_start = time.time()
                 save_statistics(sensor, 'min', min_stats, min_frequencies, min_amplitudes)
+                save_times['min'] += time.time() - save_start
             except Exception as e:
                 logger.error(f"Failed to save {sensor} (min) statistics to database: {e}")
         else:
@@ -326,7 +333,9 @@ def load_all_sensor_data_with_modes():
             
             # Save COMBINED statistics to database
             try:
+                save_start = time.time()
                 save_statistics(sensor, 'combined', combined_stats, combined_frequencies, combined_amplitudes)
+                save_times['combined'] += time.time() - save_start
             except Exception as e:
                 logger.error(f"Failed to save {sensor} (combined) statistics to database: {e}")
         else:
@@ -336,11 +345,22 @@ def load_all_sensor_data_with_modes():
                 'health': 'unknown', 'data_points': 0
             }
     
+    total_load_time = time.time() - load_start
+    logger.info(
+        f"📊 Data load complete: "
+        f"total={total_load_time*1000:.1f}ms, "
+        f"max_saves={save_times['max']*1000:.1f}ms, "
+        f"min_saves={save_times['min']*1000:.1f}ms, "
+        f"combined_saves={save_times['combined']*1000:.1f}ms | "
+        f"3 sensors × 3 modes = 9 database rows"
+    )
+    
     return sensor_data
 
 @app.route('/api/sensor-data')
 def get_sensor_data():
     """Get all sensor data for all three modes."""
+    api_start = time.time()
     try:
         mode = request.args.get('mode', 'max').lower()
         
@@ -355,18 +375,24 @@ def get_sensor_data():
             if mode in modes:
                 filtered_data[sensor_name] = modes[mode]
         
+        api_time = time.time() - api_start
+        logger.info(f"🚀 /api/sensor-data ({mode}) response time: {api_time*1000:.1f}ms")
+        
         return jsonify({
             'status': 'success',
             'mode': mode,
             'data': filtered_data,
-            'timestamp': dt.datetime.now().isoformat()
+            'timestamp': dt.datetime.now().isoformat(),
+            'response_time_ms': round(api_time * 1000, 2)
         })
     except Exception as e:
+        logger.error(f"API error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/sensor/<sensor_name>')
 def get_sensor_detail(sensor_name):
     """Get detailed data for a specific sensor in all modes."""
+    api_start = time.time()
     if sensor_name not in SENSORS:
         return jsonify({'error': 'Invalid sensor'}), 400
     
@@ -374,13 +400,18 @@ def get_sensor_detail(sensor_name):
         sensor_data = load_all_sensor_data_with_modes()
         data = sensor_data.get(sensor_name, {})
         
+        api_time = time.time() - api_start
+        logger.info(f"🚀 /api/sensor/{sensor_name} response time: {api_time*1000:.1f}ms")
+        
         return jsonify({
             'sensor': sensor_name,
             'max': data.get('max', {}),
             'min': data.get('min', {}),
-            'combined': data.get('combined', {})
+            'combined': data.get('combined', {}),
+            'response_time_ms': round(api_time * 1000, 2)
         })
     except Exception as e:
+        logger.error(f"API error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/files')

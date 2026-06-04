@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import './index.css';
 
-const API_BASE_URL = 'http://localhost:5001';
+const API_BASE_URL = 'https://wilo-cloud-monitoring.onrender.com';
 const SENSORS = ['acceleration', 'current', 'audio'];
 const MODES = [
   { value: 'max', label: 'MAX View' },
