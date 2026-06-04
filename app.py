@@ -666,6 +666,48 @@ def upload_status():
         logger.error(f'Error getting upload status: {str(e)}')
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/file-stats')
+def file_stats():
+    """Return statistics and raw data for a specific CSV filename in the Data directory.
+
+    Query param: filename=<basename.csv>
+    """
+    filename = request.args.get('filename')
+    if not filename:
+        return jsonify({'error': 'filename parameter required'}), 400
+
+    # Prevent directory traversal
+    if os.path.basename(filename) != filename:
+        return jsonify({'error': 'invalid filename'}), 400
+
+    filepath = os.path.join(DATA_DIR, filename)
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'file not found'}), 404
+
+    try:
+        timestamps, values, file_ts = load_csv_data(filename)
+        stats_dict = calculate_statistics(values)
+        freqs, amps = calculate_fft_analysis(values)
+        full_freqs, full_amps = calculate_fft_full_spectrum(values)
+
+        return jsonify({
+            'status': 'success',
+            'filename': filename,
+            'file_timestamp': file_ts,
+            'row_count': len(values),
+            'stats': stats_dict,
+            'frequencies': freqs,
+            'amplitudes': amps,
+            'full_spectrum_freqs': full_freqs,
+            'full_spectrum_amps': full_amps,
+            'raw_timestamps': timestamps,
+            'raw_values': values
+        })
+    except Exception as e:
+        logger.error(f'Error computing file stats for {filename}: {e}')
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     print(' * Starting Predictive Maintenance Backend...')
     from flask_socketio import SocketIO

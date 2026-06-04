@@ -194,61 +194,36 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
  * - Maintains original data processing and chart generation
  * - Enhanced with professional card and table styling
  */
-function StatisticalAnalysisChart({ sensor, sensorData, selectedParam }) {
-  if (!sensorData || !sensorData.stats) {
-    return (
-      <div className="bg-white rounded-xl shadow-md p-8 h-full flex items-center justify-center">
-        <p className="text-gray-400 text-center">No data available</p>
-      </div>
-    );
-  }
-
-  const stats = sensorData.stats;
+function StatisticalAnalysisChart({ sensor, sensorData, selectedParam, historicalStats = [] }) {
+  // Use historicalStats (array of file stats ordered oldest->newest) when available
   const frequencies = sensorData.frequencies || [];
   const amplitudes = sensorData.amplitudes || [];
-  
-  let paramValue = 0;
+
   let paramLabel = selectedParam;
 
-  // Get value based on parameter type (unchanged logic)
+  const getParamFromEntry = (entry) => {
+    if (!entry) return 0;
+    if (selectedParam.startsWith('frequency')) {
+      const idx = parseInt(selectedParam.replace('frequency', '')) - 1;
+      return entry.frequencies?.[idx] || 0;
+    }
+    if (selectedParam.startsWith('amplitude')) {
+      const idx = parseInt(selectedParam.replace('amplitude', '')) - 1;
+      return entry.amplitudes?.[idx] || 0;
+    }
+    return entry.stats?.[selectedParam] || 0;
+  };
+
   if (selectedParam.startsWith('frequency')) {
     const idx = parseInt(selectedParam.replace('frequency', '')) - 1;
-    paramValue = frequencies[idx] || 0;
     paramLabel = `Frequency ${idx + 1}`;
   } else if (selectedParam.startsWith('amplitude')) {
     const idx = parseInt(selectedParam.replace('amplitude', '')) - 1;
-    paramValue = amplitudes[idx] || 0;
     paramLabel = `Amplitude ${idx + 1}`;
-  } else {
-    paramValue = stats[selectedParam] || 0;
   }
 
-  const timeWindows = ['10-12', '12-14', '14-16', '16-18', '18-20'];
-  
-  // Generate realistic 2-hour window data (unchanged logic)
-  const windowData = timeWindows.map((_, idx) => {
-    const variance = 0.8 + Math.random() * 0.4;
-    return Number((paramValue * variance).toFixed(4));
-  });
-
-  const chartData = {
-    labels: timeWindows,
-    datasets: [
-      {
-        label: `${paramLabel} - 2hr Windows`,
-        data: windowData,
-        borderColor: '#10b981',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-        fill: true,
-        tension: 0.4,
-        pointRadius: 5,
-        pointBackgroundColor: '#10b981',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointHoverRadius: 7
-      }
-    ]
-  };
+  // If we have >=2 historical points, plot them; otherwise show informative placeholder
+  const hasHistory = Array.isArray(historicalStats) && historicalStats.length >= 2;
 
   const options = {
     responsive: true,
@@ -267,15 +242,50 @@ function StatisticalAnalysisChart({ sensor, sensorData, selectedParam }) {
     }
   };
 
+  if (!hasHistory) {
+    return (
+      <div className="bg-white rounded-xl shadow-md p-8 h-full flex flex-col">
+        <div className="mb-6 pb-4 border-b-2 border-gray-100">
+          <h2 className="text-xl font-bold text-gray-900 mb-3">Statistical Trend Analysis</h2>
+          <p className="text-sm text-gray-600 font-medium">Parameter: <span className="text-blue-600 font-semibold">{paramLabel}</span></p>
+        </div>
+        <div className="flex-1 flex items-center justify-center text-gray-500">
+          <div className="text-center">
+            <p className="text-lg font-semibold">Insufficient historical data</p>
+            <p className="text-sm mt-2">We need at least two previous uploads to build a trend.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const labels = historicalStats.map(h => h.file_timestamp ? new Date(h.file_timestamp).toLocaleString() : '—');
+  const datasetValues = historicalStats.map(h => Number(getParamFromEntry(h)));
+
+  const chartData = {
+    labels,
+    datasets: [
+      {
+        label: `${paramLabel} - Historical`,
+        data: datasetValues,
+        borderColor: '#10b981',
+        backgroundColor: 'rgba(16, 185, 129, 0.08)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 6,
+        pointBackgroundColor: '#10b981',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2
+      }
+    ]
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-md p-8 flex flex-col h-full">
-      {/* Card Header */}
       <div className="mb-6 pb-4 border-b-2 border-gray-100">
         <h2 className="text-xl font-bold text-gray-900 mb-3">Statistical Trend Analysis</h2>
         <p className="text-sm text-gray-600 font-medium">Parameter: <span className="text-blue-600 font-semibold">{paramLabel}</span></p>
       </div>
-
-      {/* Chart Container */}
       <div style={{ height: '320px', flex: 1 }} className="relative">
         <Line data={chartData} options={options} />
       </div>
@@ -454,6 +464,7 @@ function App() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [fileHistory, setFileHistory] = useState([]);
+  const [historicalStats, setHistoricalStats] = useState([]);
 
   // API functions (logic unchanged - fully preserved)
   const fetchSensorData = async (selectedMode = 'max') => {
@@ -501,6 +512,18 @@ function App() {
       }
       
       setFileHistory(pairs.slice(0, 5));
+      
+      // Fetch per-file stats for recent files to build historical trend
+      const recentFiles = sensorFiles.slice(0, 6); // up to 6 recent files
+      const statsPromises = recentFiles.map(f =>
+        fetch(`${API_BASE_URL}/api/file-stats?filename=${encodeURIComponent(f.name)}`).then(r => r.ok ? r.json() : null).catch(() => null)
+      );
+
+      const statsResults = await Promise.all(statsPromises);
+      const filtered = statsResults.filter(r => r && r.status === 'success');
+      // Map to an ordered array oldest->newest
+      const ordered = filtered.reverse();
+      setHistoricalStats(ordered);
     } catch (err) {
       console.error('Error fetching file history:', err);
     }
@@ -730,6 +753,7 @@ function App() {
                       sensor={timeSeriesSensor}
                       sensorData={sensorData[timeSeriesSensor] || {}}
                       selectedParam={selectedParam}
+                      historicalStats={historicalStats}
                     />
                   </div>
                 </div>
