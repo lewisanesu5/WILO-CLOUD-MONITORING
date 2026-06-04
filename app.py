@@ -8,7 +8,7 @@ from scipy import stats
 import datetime as dt
 import logging
 from functools import wraps
-import hashliby
+import hashlib
 import time
 from dotenv import load_dotenv
 from database import save_statistics, test_connection
