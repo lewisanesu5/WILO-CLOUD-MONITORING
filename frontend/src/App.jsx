@@ -80,7 +80,10 @@ const STAT_PARAMETERS = [
  * - Enhanced UI with professional card styling
  */
 function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
-  if (!sensorData || !sensorData.stats) {
+  // Prefer plotting raw values (timestamps + values) when available
+  const hasRaw = sensorData && Array.isArray(sensorData.raw_values) && sensorData.raw_values.length > 0;
+
+  if (!sensorData || (!hasRaw && !sensorData.stats)) {
     return (
       <div className="bg-white rounded-xl shadow-md p-8 h-full flex items-center justify-center">
         <p className="text-gray-400 text-center">No data available</p>
@@ -88,25 +91,50 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
     );
   }
 
-  const data = sensorData.stats;
-  const chartData = {
-    labels: ['Min', 'Mean', 'Max'],
-    datasets: [
-      {
-        label: `${sensor} - Time Series`,
-        data: [data.min || 0, data.mean || 0, data.max || 0],
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        fill: true,
-        tension: 0.4,
-        pointRadius: 5,
-        pointBackgroundColor: '#3b82f6',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointHoverRadius: 7
-      }
-    ]
-  };
+  let chartData;
+  if (hasRaw) {
+    const timestamps = sensorData.raw_timestamps || [];
+    const values = sensorData.raw_values || [];
+    // Normalize timestamps to seconds from start (0 - 2s)
+    const start = timestamps.length ? timestamps[0] : 0;
+    const labels = timestamps.map(t => ((t - start) / 1000).toFixed(3));
+
+    chartData = {
+      labels,
+      datasets: [
+        {
+          label: `${sensor} - Raw (0-2s)`,
+          data: values,
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.06)',
+          fill: true,
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2
+        }
+      ]
+    };
+  } else {
+    const data = sensorData.stats;
+    chartData = {
+      labels: ['Min', 'Mean', 'Max'],
+      datasets: [
+        {
+          label: `${sensor} - Time Series`,
+          data: [data.min || 0, data.mean || 0, data.max || 0],
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointBackgroundColor: '#3b82f6',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          pointHoverRadius: 7
+        }
+      ]
+    };
+  }
 
   const options = {
     responsive: true,
@@ -120,6 +148,7 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
         grid: { color: 'rgba(0,0,0,0.05)' }
       },
       x: {
+        title: { display: true, text: hasRaw ? 'Seconds (s)' : 'Category', font: { size: 12, weight: '600' } },
         grid: { display: false }
       }
     }

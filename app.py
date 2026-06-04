@@ -8,7 +8,7 @@ from scipy import stats
 import datetime as dt
 import logging
 from functools import wraps
-import hashlib
+import hashliby
 import time
 from dotenv import load_dotenv
 from database import save_statistics, test_connection
@@ -65,25 +65,42 @@ UPLOAD_FREQUENCY_MINUTES = 110  # Min 110 mins between uploads (2hr target +10mi
 UPLOAD_BATCH_SIZE = 2  # Expected 2 files per upload (max and min)
 
 def load_csv_data(filename):
-    """Load CSV data and return timestamps and values."""
+    """Load CSV data and return timestamps, values, and file modified timestamp (ISO).
+
+    Returns: (timestamps_ms_list, values_list, file_modified_iso or None)
+    """
     filepath = os.path.join(DATA_DIR, filename)
     if not os.path.exists(filepath):
-        return [], []
+        return [], [], None
     
     timestamps = []
     values = []
+    file_modified_iso = None
     try:
+        # Record file modified time
+        try:
+            mtime = os.path.getmtime(filepath)
+            file_modified_iso = dt.datetime.fromtimestamp(mtime).isoformat()
+        except Exception:
+            file_modified_iso = None
+
         with open(filepath, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 try:
                     # Handle timestamp
                     timestamp_str = row.get('timestamp', '')
-                    if 'T' in timestamp_str:  # ISO format
+                    if isinstance(timestamp_str, str) and 'T' in timestamp_str:  # ISO format
                         dt_obj = dt.datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
                         timestamp = dt_obj.timestamp() * 1000
                     else:
-                        timestamp = float(timestamp_str)
+                        # If timestamp is numeric string, try float (assumed seconds or milliseconds)
+                        ts_val = float(timestamp_str)
+                        # Heuristic: if ts looks like seconds (10 digits), convert to ms
+                        if ts_val < 1e11:
+                            timestamp = ts_val * 1000
+                        else:
+                            timestamp = ts_val
                     
                     # Handle value
                     value = float(row.get('value', 0))
@@ -92,9 +109,9 @@ def load_csv_data(filename):
                 except (ValueError, KeyError):
                     continue
     except Exception as e:
-        print(f"Error loading {filename}: {e}")
+        logger.error(f"Error loading {filename}: {e}")
     
-    return timestamps, values
+    return timestamps, values, file_modified_iso
 
 def merge_max_min_files(max_timestamps, max_values, min_timestamps, min_values):
     """
@@ -244,9 +261,9 @@ def load_all_sensor_data_with_modes():
     for sensor in SENSORS:
         sensor_data[sensor] = {}
         
-        # Load max and min files
-        max_timestamps, max_values = load_csv_data(f"max_{sensor}.csv")
-        min_timestamps, min_values = load_csv_data(f"min_{sensor}.csv")
+        # Load max and min files (now also returns file modified timestamp)
+        max_timestamps, max_values, max_file_ts = load_csv_data(f"max_{sensor}.csv")
+        min_timestamps, min_values, min_file_ts = load_csv_data(f"min_{sensor}.csv")
         
         # --- MAX MODE ---
         if max_values:
@@ -262,7 +279,10 @@ def load_all_sensor_data_with_modes():
                 'full_spectrum_freqs': max_full_freqs,
                 'full_spectrum_amps': max_full_amps,
                 'health': max_health,
-                'data_points': len(max_values)
+                'data_points': len(max_values),
+                'raw_timestamps': max_timestamps,
+                'raw_values': max_values,
+                'file_timestamp': max_file_ts
             }
             
             # Save MAX statistics to database
@@ -293,7 +313,10 @@ def load_all_sensor_data_with_modes():
                 'full_spectrum_freqs': min_full_freqs,
                 'full_spectrum_amps': min_full_amps,
                 'health': min_health,
-                'data_points': len(min_values)
+                'data_points': len(min_values),
+                'raw_timestamps': min_timestamps,
+                'raw_values': min_values,
+                'file_timestamp': min_file_ts
             }
             
             # Save MIN statistics to database
@@ -321,6 +344,18 @@ def load_all_sensor_data_with_modes():
             combined_full_freqs, combined_full_amps = calculate_fft_full_spectrum(merged_values)
             combined_health = get_sensor_health_status(combined_stats)
             
+            # Determine latest file timestamp between max and min files
+            combined_file_ts = None
+            try:
+                if max_file_ts and min_file_ts:
+                    dt_max = dt.datetime.fromisoformat(max_file_ts)
+                    dt_min = dt.datetime.fromisoformat(min_file_ts)
+                    combined_file_ts = dt_max.isoformat() if dt_max >= dt_min else dt_min.isoformat()
+                else:
+                    combined_file_ts = max_file_ts or min_file_ts
+            except Exception:
+                combined_file_ts = max_file_ts or min_file_ts
+
             sensor_data[sensor]['combined'] = {
                 'stats': combined_stats,
                 'frequencies': combined_frequencies,
@@ -328,7 +363,10 @@ def load_all_sensor_data_with_modes():
                 'full_spectrum_freqs': combined_full_freqs,
                 'full_spectrum_amps': combined_full_amps,
                 'health': combined_health,
-                'data_points': len(merged_values)
+                'data_points': len(merged_values),
+                'raw_timestamps': merged_timestamps,
+                'raw_values': merged_values,
+                'file_timestamp': combined_file_ts
             }
             
             # Save COMBINED statistics to database
