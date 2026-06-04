@@ -138,7 +138,7 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
 
   const options = {
     responsive: true,
-    maintainAspectRatio: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: true, position: 'top', labels: { padding: 16, font: { size: 12, weight: '600' } } }
     },
@@ -181,7 +181,7 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
       </div>
 
       {/* Chart Container */}
-      <div style={{ height: '320px', flex: 1 }} className="relative">
+      <div className="relative flex-1 min-h-[380px]">
         <Line data={chartData} options={options} />
       </div>
     </div>
@@ -252,7 +252,7 @@ function StatisticalAnalysisChart({ sensor, sensorData, selectedParam, historica
 
   const options = {
     responsive: true,
-    maintainAspectRatio: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: true, position: 'top', labels: { padding: 16, font: { size: 12, weight: '600' } } }
     },
@@ -311,7 +311,7 @@ function StatisticalAnalysisChart({ sensor, sensorData, selectedParam, historica
         <h2 className="text-xl font-bold text-gray-900 mb-3">Statistical Trend Analysis</h2>
         <p className="text-sm text-gray-600 font-medium">Parameter: <span className="text-blue-600 font-semibold">{paramLabel}</span></p>
       </div>
-      <div style={{ height: '320px', flex: 1 }} className="relative">
+      <div className="relative flex-1 min-h-[380px]">
         <Line data={chartData} options={options} />
       </div>
     </div>
@@ -758,7 +758,7 @@ function App() {
                 ================================================ */}
             <div className="lg:col-span-2 space-y-6">
               {/* TIME SERIES CHART CARD */}
-              <div className="bg-white rounded-xl shadow-md overflow-hidden h-96">
+              <div className="bg-white rounded-xl shadow-md overflow-hidden min-h-[520px]">
                 <div onDoubleClick={() => openModal(`Time Series - ${timeSeriesSensor}`, (
                   <div style={{ height: '80vh' }}>
                     <TimeSeriesChart
@@ -777,7 +777,7 @@ function App() {
               </div>
 
               {/* STATISTICAL TREND ANALYSIS CARD */}
-              <div className="bg-white rounded-xl shadow-md overflow-hidden">
+              <div className="bg-white rounded-xl shadow-md overflow-hidden min-h-[520px]">
                 {/* Parameter Selector Header */}
                 <div className="bg-gradient-to-r from-emerald-50 to-emerald-100 px-8 py-5 border-b-2 border-emerald-200">
                   <h2 className="text-lg font-bold text-gray-900 mb-3">Statistical Trend Analysis</h2>
