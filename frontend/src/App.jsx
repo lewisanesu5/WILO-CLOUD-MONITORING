@@ -155,7 +155,7 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-md p-8 flex flex-col h-full">
+    <div className="bg-white rounded-xl shadow-md p-8 flex flex-col h-full cursor-pointer" onDoubleClick={() => { /* placeholder for parent handler */ }}>
       {/* Card Header */}
       <div className="mb-6 pb-4 border-b-2 border-gray-100">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Time Series Analysis</h2>
@@ -183,6 +183,31 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
       {/* Chart Container */}
       <div style={{ height: '320px', flex: 1 }} className="relative">
         <Line data={chartData} options={options} />
+      </div>
+    </div>
+  );
+}
+
+// Fullscreen Modal Component
+function FullscreenModal({ open, onClose, title, children }) {
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    if (open) window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
+      <div className="relative w-[95%] max-w-6xl max-h-[92vh] overflow-auto bg-white rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+          <button onClick={onClose} className="text-gray-600 hover:text-gray-900 text-xl px-3 py-1">✕</button>
+        </div>
+        <div className="p-6">{children}</div>
       </div>
     </div>
   );
@@ -310,7 +335,7 @@ function FileHistoryTable({ files, sensor }) {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-md overflow-hidden">
+    <div className="bg-white rounded-xl shadow-md overflow-hidden cursor-pointer" onDoubleClick={() => {}}>
       {/* Card Header */}
       <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b-2 border-gray-200">
         <h3 className="text-lg font-bold text-gray-900">File Upload History</h3>
@@ -395,7 +420,7 @@ function EnhancedStatisticsTable({ sensorData, selectedSensor, mode }) {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-md overflow-hidden flex flex-col">
+    <div className="bg-white rounded-xl shadow-md overflow-hidden flex flex-col cursor-pointer" onDoubleClick={() => {}}>
       {/* Card Header */}
       <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-5 border-b-2 border-blue-200">
         <h3 className="text-lg font-bold text-gray-900 mb-1">Statistical Analysis Table</h3>
@@ -465,6 +490,9 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [fileHistory, setFileHistory] = useState([]);
   const [historicalStats, setHistoricalStats] = useState([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalContent, setModalContent] = useState(null);
 
   // API functions (logic unchanged - fully preserved)
   const fetchSensorData = async (selectedMode = 'max') => {
@@ -562,6 +590,17 @@ function App() {
 
   const handleTimeSeriesSensorChange = (newSensor) => {
     setTimeSeriesSensor(newSensor);
+  };
+
+  const openModal = (title, content) => {
+    setModalTitle(title);
+    setModalContent(content);
+    setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalContent(null);
   };
 
   const currentSensorData = sensorData[selectedSensor] || {};
@@ -707,6 +746,11 @@ function App() {
                   mode={mode}
                 />
               </div>
+
+              {/* Fullscreen modal */}
+              <FullscreenModal open={modalOpen} onClose={closeModal} title={modalTitle}>
+                {modalContent}
+              </FullscreenModal>
             </div>
 
             {/* ================================================
@@ -715,11 +759,21 @@ function App() {
             <div className="lg:col-span-2 space-y-6">
               {/* TIME SERIES CHART CARD */}
               <div className="bg-white rounded-xl shadow-md overflow-hidden h-96">
-                <TimeSeriesChart 
-                  sensor={timeSeriesSensor} 
-                  sensorData={sensorData[timeSeriesSensor] || {}}
-                  onSensorChange={handleTimeSeriesSensorChange}
-                />
+                <div onDoubleClick={() => openModal(`Time Series - ${timeSeriesSensor}`, (
+                  <div style={{ height: '80vh' }}>
+                    <TimeSeriesChart
+                      sensor={timeSeriesSensor}
+                      sensorData={sensorData[timeSeriesSensor] || {}}
+                      onSensorChange={handleTimeSeriesSensorChange}
+                    />
+                  </div>
+                ))}>
+                  <TimeSeriesChart 
+                    sensor={timeSeriesSensor} 
+                    sensorData={sensorData[timeSeriesSensor] || {}}
+                    onSensorChange={handleTimeSeriesSensorChange}
+                  />
+                </div>
               </div>
 
               {/* STATISTICAL TREND ANALYSIS CARD */}
@@ -748,7 +802,16 @@ function App() {
 
                 {/* Chart Container */}
                 <div className="p-8">
-                  <div style={{ height: '320px' }} className="relative">
+                  <div onDoubleClick={() => openModal(`Statistical Trend - ${selectedParam}`, (
+                    <div style={{ height: '80vh' }}>
+                      <StatisticalAnalysisChart
+                        sensor={timeSeriesSensor}
+                        sensorData={sensorData[timeSeriesSensor] || {}}
+                        selectedParam={selectedParam}
+                        historicalStats={historicalStats}
+                      />
+                    </div>
+                  ))} style={{ height: '320px' }} className="relative">
                     <StatisticalAnalysisChart
                       sensor={timeSeriesSensor}
                       sensorData={sensorData[timeSeriesSensor] || {}}
