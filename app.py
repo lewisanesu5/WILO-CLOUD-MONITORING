@@ -554,6 +554,16 @@ def upload_files():
         # 3. LOG UPLOAD EVENT
         log_upload_event(sensor_id, saved_files, upload_timestamp)
         
+        # 4. CALCULATE AND SAVE STATISTICS TO DATABASE
+        try:
+            db_write_start = time.time()
+            sensor_data = load_all_sensor_data_with_modes()
+            db_write_time = time.time() - db_write_start
+            logger.info(f"✓ Statistics calculated and saved to database in {db_write_time*1000:.1f}ms after upload from {sensor_id}")
+        except Exception as e:
+            logger.error(f"Warning: Could not save statistics to database after upload: {e}")
+            # Don't fail the upload response - just log the error
+        
         return jsonify({
             'status': 'success',
             'message': f'Uploaded {len(saved_files)} file(s)',
