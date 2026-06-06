@@ -3,6 +3,7 @@ from flask_cors import CORS
 import os
 import glob
 import csv
+import shutil
 import numpy as np
 from scipy import stats
 import datetime as dt
@@ -906,10 +907,31 @@ def simulate_event():
         if not event_time:
             event_time = dt.datetime.now().isoformat()
         
-        # Validate fault folder exists
+        # Build fault directory path
         fault_dir = os.path.join(DATA_DIR, fault_type)
+        
+        # Debug logging
+        logger.info(f'Attempting to simulate: {fault_type}')
+        logger.info(f'DATA_DIR: {DATA_DIR}')
+        logger.info(f'fault_dir: {fault_dir}')
+        logger.info(f'fault_dir exists: {os.path.exists(fault_dir)}')
+        
+        # Validate fault folder exists
         if not os.path.exists(fault_dir):
-            return jsonify({'error': f'Fault type "{fault_type}" not found in Data directory'}), 404
+            logger.error(f'Fault directory not found: {fault_dir}')
+            # List available directories for debugging
+            available = []
+            try:
+                available = [d for d in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, d))]
+            except Exception as list_err:
+                logger.error(f'Cannot list Data directory: {list_err}')
+            
+            return jsonify({
+                'error': f'Fault type "{fault_type}" not found',
+                'available_faults': available,
+                'data_dir': DATA_DIR,
+                'checked_path': fault_dir
+            }), 404
         
         logger.info(f'Simulating event: {fault_type} at {event_time}')
         
@@ -929,8 +951,7 @@ def simulate_event():
             dest_filename = f'{timestamp_str}_max_{param}.csv'
             dest_file = os.path.join(DATA_DIR, dest_filename)
             
-            # Read and copy file
-            import shutil
+            # Copy file
             shutil.copy2(source_file, dest_file)
             copied_files.append(dest_filename)
             logger.info(f'Copied: {source_file} → {dest_file}')
@@ -959,7 +980,7 @@ def simulate_event():
         }), 200
         
     except Exception as e:
-        logger.error(f'Error simulating event: {e}')
+        logger.error(f'Error simulating event: {e}', exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
