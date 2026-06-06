@@ -725,25 +725,25 @@ function App() {
   };
 
   const handleCreateEvent = async () => {
-    const finalEventName = eventName === '__custom__' ? customEventName.trim() : eventName;
+    const faultType = eventName === '__custom__' ? customEventName.trim() : eventName;
 
-    if (!eventTime || !finalEventName) {
-      alert('Please fill in all required fields');
+    if (!eventTime || !faultType) {
+      alert('Please select a fault type and event time');
       return;
     }
 
     setEventSubmitting(true);
 
     try {
-      const failureTimeISO = new Date(eventTime).toISOString();
-      const response = await fetch(`${API_BASE_URL}/create-event`, {
+      // Call the simulate-event endpoint instead of create-event
+      const response = await fetch(`${API_BASE_URL}/simulate-event`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          event_name: finalEventName,
-          failure_time_iso: failureTimeISO,
+          fault_type: faultType,
+          event_time: new Date(eventTime).toISOString(),
           description: eventDescription
         })
       });
@@ -751,14 +751,20 @@ function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to create event');
+        throw new Error(data.error || 'Failed to simulate event');
       }
 
-      alert(`Event "${finalEventName}" successfully logged!\n\nEvent ID: ${data.event_id}\nTime Before Failure: ${Math.abs(data.metadata.time_before_failure_seconds).toFixed(2)} seconds\nData Points Tracked: ${data.metadata.total_data_points}`);
+      // Show success with sensor data preview
+      alert(`✓ Event "${faultType}" simulated successfully!\n\n` +
+            `Files copied: ${data.files_copied.join(', ')}\n` +
+            `Database updated with sensor readings.`);
+      
+      // Refresh sensor data to show the simulated event
+      await fetchSensorData('max');
       await fetchEvents();
       closeEventModal();
     } catch (error) {
-      console.error('Error creating event:', error);
+      console.error('Error simulating event:', error);
       alert(`Error: ${error.message}`);
     } finally {
       setEventSubmitting(false);

@@ -887,6 +887,82 @@ def file_stats():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/simulate-event', methods=['POST'])
+def simulate_event():
+    """
+    Simulate a fault event by copying fault-specific sensor data files.
+    Copies max_*.csv files from Data/[fault_type]/ to Data/
+    This triggers the normal processing pipeline.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        fault_type = data.get('fault_type')
+        event_time = data.get('event_time')
+        
+        if not fault_type:
+            return jsonify({'error': 'fault_type is required'}), 400
+        
+        # Use current time if not provided
+        if not event_time:
+            event_time = dt.datetime.now().isoformat()
+        
+        # Validate fault folder exists
+        fault_dir = os.path.join(DATA_DIR, fault_type)
+        if not os.path.exists(fault_dir):
+            return jsonify({'error': f'Fault type "{fault_type}" not found in Data directory'}), 404
+        
+        logger.info(f'Simulating event: {fault_type} at {event_time}')
+        
+        # Copy max_*.csv files from fault folder to Data/
+        copied_files = []
+        param_types = ['acceleration', 'current', 'audio']
+        
+        for param in param_types:
+            source_file = os.path.join(fault_dir, f'max_{param}.csv')
+            
+            if not os.path.exists(source_file):
+                logger.warning(f'File not found: {source_file}')
+                continue
+            
+            # Copy to Data directory with timestamp in filename
+            timestamp_str = dt.datetime.now().strftime('%Y%m%d_%H%M%S')
+            dest_filename = f'{timestamp_str}_max_{param}.csv'
+            dest_file = os.path.join(DATA_DIR, dest_filename)
+            
+            # Read and copy file
+            import shutil
+            shutil.copy2(source_file, dest_file)
+            copied_files.append(dest_filename)
+            logger.info(f'Copied: {source_file} → {dest_file}')
+        
+        if not copied_files:
+            return jsonify({'error': 'No sensor files found in fault directory'}), 404
+        
+        # Load and process the copied files to populate database
+        try:
+            load_all_sensor_data_with_modes()
+            logger.info(f'Database populated with simulated event data')
+        except Exception as e:
+            logger.warning(f'Database population warning: {e}')
+            # Don't fail the request, files are still copied
+        
+        # Fetch the simulated data
+        sensor_data = get_sensor_data_with_raw_data('max')
+        
+        return jsonify({
+            'success': True,
+            'message': f'Event "{fault_type}" simulated successfully',
+            'event_time': event_time,
+            'fault_type': fault_type,
+            'files_copied': copied_files,
+            'sensor_data': sensor_data
+        }), 200
+        
+    except Exception as e:
+        logger.error(f'Error simulating event: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/create-event', methods=['POST'])
 def create_event():
     """Create a new failure event with backward slope tracking."""
@@ -903,6 +979,33 @@ def create_event():
         return jsonify(result), 201
     except Exception as e:
         logger.error(f'Error creating event: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/available-faults', methods=['GET'])
+def get_available_faults():
+    """Get list of available fault types that can be simulated."""
+    try:
+        faults = []
+        for item in os.listdir(DATA_DIR):
+            item_path = os.path.join(DATA_DIR, item)
+            # Only include directories that are not sensor-related files
+            if os.path.isdir(item_path) and not item.startswith('.'):
+                # Check if it has the max_*.csv files
+                has_max_files = any(
+                    os.path.exists(os.path.join(item_path, f'max_{param}.csv'))
+                    for param in ['acceleration', 'current', 'audio']
+                )
+                if has_max_files:
+                    faults.append(item)
+        
+        faults.sort()
+        return jsonify({
+            'faults': faults,
+            'count': len(faults)
+        }), 200
+    except Exception as e:
+        logger.error(f'Error getting available faults: {e}')
         return jsonify({'error': str(e)}), 500
 
 
