@@ -262,6 +262,7 @@ def extract_stats_from_db_row(row):
         'min': row_dict.get('x_min', 0),
         'max': row_dict.get('x_max', 0),
         'mean': row_dict.get('mean', 0),
+        'range': row_dict.get('range', 0),
         'std_dev': row_dict.get('standard_deviation', 0),
         'skewness': row_dict.get('skewness', 0),
         'kurtosis': row_dict.get('kurtosis', 0)

@@ -30,7 +30,7 @@ def save_statistics(sensor_name, mode, stats_dict, frequencies, amplitudes):
     Args:
         sensor_name: 'acceleration', 'current', or 'audio'
         mode: 'max', 'min', or 'combined'
-        stats_dict: Dictionary with keys: mean, max, min, std_dev, skewness, kurtosis
+        stats_dict: Dictionary with keys: mean, max, min, std_dev, range, skewness, kurtosis
         frequencies: List of top 5 frequencies
         amplitudes: List of top 5 amplitudes
     """
@@ -56,10 +56,10 @@ def save_statistics(sensor_name, mode, stats_dict, frequencies, amplitudes):
         
         query = f"""
             INSERT INTO {table_name} 
-            (x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+            (x_min, x_max, mean, range, standard_deviation, skewness, kurtosis,
              frequency1, frequency2, frequency3, frequency4, frequency5,
              amplitude1, amplitude2, amplitude3, amplitude4, amplitude5)
-            VALUES (%s, %s, %s, %s, %s, %s,
+            VALUES (%s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s)
         """
@@ -69,6 +69,7 @@ def save_statistics(sensor_name, mode, stats_dict, frequencies, amplitudes):
             stats_dict.get('min', 0),           # x_min
             stats_dict.get('max', 0),           # x_max
             stats_dict.get('mean', 0),          # mean
+            stats_dict.get('range', 0),         # range ✅ NOW INCLUDED
             stats_dict.get('std_dev', 0),       # standard_deviation
             stats_dict.get('skewness', 0),      # skewness
             stats_dict.get('kurtosis', 0),      # kurtosis
@@ -167,7 +168,7 @@ def get_all_latest_statistics_by_mode(mode='max'):
             try:
                 query = f"""
                     SELECT 
-                        x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                        x_min, x_max, mean, range, standard_deviation, skewness, kurtosis,
                         frequency1, frequency2, frequency3, frequency4, frequency5,
                         amplitude1, amplitude2, amplitude3, amplitude4, amplitude5
                     FROM {sensor_name}
@@ -185,6 +186,7 @@ def get_all_latest_statistics_by_mode(mode='max'):
                             'min': row_dict.get('x_min', 0),
                             'max': row_dict.get('x_max', 0),
                             'mean': row_dict.get('mean', 0),
+                            'range': row_dict.get('range', 0),
                             'std_dev': row_dict.get('standard_deviation', 0),
                             'skewness': row_dict.get('skewness', 0),
                             'kurtosis': row_dict.get('kurtosis', 0)
