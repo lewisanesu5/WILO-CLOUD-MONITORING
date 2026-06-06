@@ -253,6 +253,163 @@ def get_sensor_health_status(stats_dict):
     else:
         return 'normal'
 
+def extract_stats_from_db_row(row):
+    """Extract stats dict from database row."""
+    if not row:
+        return {}
+    row_dict = dict(row) if hasattr(row, '__getitem__') else row
+    return {
+        'min': row_dict.get('x_min', 0),
+        'max': row_dict.get('x_max', 0),
+        'mean': row_dict.get('mean', 0),
+        'std_dev': row_dict.get('standard_deviation', 0),
+        'skewness': row_dict.get('skewness', 0),
+        'kurtosis': row_dict.get('kurtosis', 0)
+    }
+
+def extract_fft_from_db_row(row):
+    """Extract FFT frequencies and amplitudes from database row."""
+    if not row:
+        return [], []
+    row_dict = dict(row) if hasattr(row, '__getitem__') else row
+    frequencies = [
+        row_dict.get('frequency1', 0),
+        row_dict.get('frequency2', 0),
+        row_dict.get('frequency3', 0),
+        row_dict.get('frequency4', 0),
+        row_dict.get('frequency5', 0)
+    ]
+    amplitudes = [
+        row_dict.get('amplitude1', 0),
+        row_dict.get('amplitude2', 0),
+        row_dict.get('amplitude3', 0),
+        row_dict.get('amplitude4', 0),
+        row_dict.get('amplitude5', 0)
+    ]
+    return frequencies, amplitudes
+
+def get_latest_statistics_for_mode(sensor_name, mode):
+    """Get latest statistics from database for a specific sensor and mode."""
+    from database import get_latest_statistics
+    try:
+        return get_latest_statistics(sensor_name)
+    except Exception as e:
+        logger.warning(f"Could not get stats from DB for {sensor_name}: {e}")
+        return None
+
+def get_sensor_data_with_raw_data(mode='max'):
+    """
+    Get sensor data combining:
+    - Raw CSV data (timestamps, values) for time-series charts
+    - Calculated statistics from database
+    
+    This hybrid approach:
+    - Keeps CSV loading for visualization
+    - Gets pre-calculated stats from DB (efficient)
+    """
+    sensor_data = {}
+    
+    for sensor in SENSORS:
+        sensor_data[sensor] = {}
+        
+        # Load raw data from CSV files for time-series display
+        max_timestamps, max_values, max_file_ts = load_csv_data(f"max_{sensor}.csv")
+        min_timestamps, min_values, min_file_ts = load_csv_data(f"min_{sensor}.csv")
+        
+        # Get stats from database instead of calculating
+        try:
+            max_stats_row = get_latest_statistics_for_mode(sensor, 'max')
+            min_stats_row = get_latest_statistics_for_mode(sensor, 'min')
+            combined_stats_row = get_latest_statistics_for_mode(sensor, 'combined')
+        except Exception as e:
+            logger.error(f"Could not fetch stats from DB for {sensor}: {e}")
+            max_stats_row = None
+            min_stats_row = None
+            combined_stats_row = None
+        
+        # --- MAX MODE ---
+        if max_values:
+            max_stats = extract_stats_from_db_row(max_stats_row) if max_stats_row else calculate_statistics(max_values)
+            max_frequencies, max_amplitudes = extract_fft_from_db_row(max_stats_row) if max_stats_row else calculate_fft_analysis(max_values)
+            max_health = get_sensor_health_status(max_stats)
+            
+            sensor_data[sensor]['max'] = {
+                'stats': max_stats,
+                'frequencies': max_frequencies,
+                'amplitudes': max_amplitudes,
+                'health': max_health,
+                'data_points': len(max_values),
+                'raw_timestamps': max_timestamps,
+                'raw_values': max_values,
+                'file_timestamp': max_file_ts
+            }
+        else:
+            sensor_data[sensor]['max'] = {
+                'stats': {}, 'frequencies': [], 'amplitudes': [],
+                'health': 'unknown', 'data_points': 0,
+                'raw_timestamps': [], 'raw_values': []
+            }
+        
+        # --- MIN MODE ---
+        if min_values:
+            min_stats = extract_stats_from_db_row(min_stats_row) if min_stats_row else calculate_statistics(min_values)
+            min_frequencies, min_amplitudes = extract_fft_from_db_row(min_stats_row) if min_stats_row else calculate_fft_analysis(min_values)
+            min_health = get_sensor_health_status(min_stats)
+            
+            sensor_data[sensor]['min'] = {
+                'stats': min_stats,
+                'frequencies': min_frequencies,
+                'amplitudes': min_amplitudes,
+                'health': min_health,
+                'data_points': len(min_values),
+                'raw_timestamps': min_timestamps,
+                'raw_values': min_values,
+                'file_timestamp': min_file_ts
+            }
+        else:
+            sensor_data[sensor]['min'] = {
+                'stats': {}, 'frequencies': [], 'amplitudes': [],
+                'health': 'unknown', 'data_points': 0,
+                'raw_timestamps': [], 'raw_values': []
+            }
+        
+        # --- COMBINED MODE ---
+        if max_values and min_values:
+            merged_timestamps, merged_values = merge_max_min_files(max_timestamps, max_values, min_timestamps, min_values)
+            combined_stats = extract_stats_from_db_row(combined_stats_row) if combined_stats_row else calculate_statistics(merged_values)
+            combined_frequencies, combined_amplitudes = extract_fft_from_db_row(combined_stats_row) if combined_stats_row else calculate_fft_analysis(merged_values)
+            combined_health = get_sensor_health_status(combined_stats)
+            
+            combined_file_ts = None
+            try:
+                if max_file_ts and min_file_ts:
+                    dt_max = dt.datetime.fromisoformat(max_file_ts)
+                    dt_min = dt.datetime.fromisoformat(min_file_ts)
+                    combined_file_ts = dt_max.isoformat() if dt_max >= dt_min else dt_min.isoformat()
+                else:
+                    combined_file_ts = max_file_ts or min_file_ts
+            except Exception:
+                combined_file_ts = max_file_ts or min_file_ts
+
+            sensor_data[sensor]['combined'] = {
+                'stats': combined_stats,
+                'frequencies': combined_frequencies,
+                'amplitudes': combined_amplitudes,
+                'health': combined_health,
+                'data_points': len(merged_values),
+                'raw_timestamps': merged_timestamps,
+                'raw_values': merged_values,
+                'file_timestamp': combined_file_ts
+            }
+        else:
+            sensor_data[sensor]['combined'] = {
+                'stats': {}, 'frequencies': [], 'amplitudes': [],
+                'health': 'unknown', 'data_points': 0,
+                'raw_timestamps': [], 'raw_values': []
+            }
+    
+    return sensor_data
+
 def load_all_sensor_data_with_modes():
     """
     Load data from all 6 CSV files and calculate statistics/FFT for all three modes.
@@ -402,7 +559,11 @@ def load_all_sensor_data_with_modes():
 
 @app.route('/api/sensor-data')
 def get_sensor_data():
-    """Get all sensor data from the database."""
+    """
+    Get sensor data from database + raw CSV files.
+    - Stats: Fetched from Render PostgreSQL
+    - Raw data: Loaded from Data/ directory on Render
+    """
     api_start = time.time()
     try:
         mode = request.args.get('mode', 'max').lower()
@@ -410,8 +571,14 @@ def get_sensor_data():
         if mode not in ['max', 'min', 'combined']:
             return jsonify({'status': 'error', 'message': f'Invalid mode: {mode}'}), 400
         
-        # Fetch latest statistics from database instead of loading CSV files
-        sensor_data = get_all_latest_statistics_by_mode(mode)
+        # Get sensor data with both raw CSV data and database statistics
+        sensor_data = get_sensor_data_with_raw_data(mode)
+        
+        # Filter data for requested mode
+        filtered_data = {}
+        for sensor_name, modes in sensor_data.items():
+            if mode in modes:
+                filtered_data[sensor_name] = modes[mode]
         
         api_time = time.time() - api_start
         logger.info(f"🚀 /api/sensor-data ({mode}) response time: {api_time*1000:.1f}ms")
@@ -419,7 +586,7 @@ def get_sensor_data():
         return jsonify({
             'status': 'success',
             'mode': mode,
-            'data': sensor_data,
+            'data': filtered_data,
             'timestamp': dt.datetime.now().isoformat(),
             'response_time_ms': round(api_time * 1000, 2)
         })
