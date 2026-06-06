@@ -135,6 +135,111 @@ def get_latest_statistics(sensor_name):
         if conn:
             conn.close()
 
+def get_all_latest_statistics_by_mode(mode='max'):
+    """
+    Fetch the latest statistics from all sensors in the database.
+    
+    Returns a dict formatted for the frontend API response:
+    {
+        "sensor_name": {
+            "stats": {mean, max, min, std_dev, skewness, kurtosis},
+            "frequencies": [f1, f2, f3, f4, f5],
+            "amplitudes": [a1, a2, a3, a4, a5],
+            "raw_values": [],
+            "raw_timestamps": []
+        }
+    }
+    
+    Args:
+        mode: 'max', 'min', or 'combined' (currently ignored since DB stores latest only)
+    
+    Returns:
+        Dict with sensor data or empty dict if DB unavailable
+    """
+    result = {}
+    sensor_names = ['acceleration', 'current', 'audio']
+    
+    try:
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        for sensor_name in sensor_names:
+            try:
+                query = f"""
+                    SELECT 
+                        x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                        frequency1, frequency2, frequency3, frequency4, frequency5,
+                        amplitude1, amplitude2, amplitude3, amplitude4, amplitude5
+                    FROM {sensor_name}
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """
+                
+                cur.execute(query)
+                row = cur.fetchone()
+                
+                if row:
+                    row_dict = dict(row)
+                    result[sensor_name] = {
+                        'stats': {
+                            'min': row_dict.get('x_min', 0),
+                            'max': row_dict.get('x_max', 0),
+                            'mean': row_dict.get('mean', 0),
+                            'std_dev': row_dict.get('standard_deviation', 0),
+                            'skewness': row_dict.get('skewness', 0),
+                            'kurtosis': row_dict.get('kurtosis', 0)
+                        },
+                        'frequencies': [
+                            row_dict.get('frequency1', 0),
+                            row_dict.get('frequency2', 0),
+                            row_dict.get('frequency3', 0),
+                            row_dict.get('frequency4', 0),
+                            row_dict.get('frequency5', 0)
+                        ],
+                        'amplitudes': [
+                            row_dict.get('amplitude1', 0),
+                            row_dict.get('amplitude2', 0),
+                            row_dict.get('amplitude3', 0),
+                            row_dict.get('amplitude4', 0),
+                            row_dict.get('amplitude5', 0)
+                        ],
+                        'raw_values': [],  # Not available from DB-only approach
+                        'raw_timestamps': []  # Not available from DB-only approach
+                    }
+                else:
+                    logger.warning(f"No statistics found in database for {sensor_name}")
+                    result[sensor_name] = {
+                        'stats': {},
+                        'frequencies': [],
+                        'amplitudes': [],
+                        'raw_values': [],
+                        'raw_timestamps': []
+                    }
+            except Exception as e:
+                logger.error(f"Error fetching stats for {sensor_name}: {e}")
+                result[sensor_name] = {
+                    'stats': {},
+                    'frequencies': [],
+                    'amplitudes': [],
+                    'raw_values': [],
+                    'raw_timestamps': []
+                }
+        
+        logger.info(f"✓ Fetched latest statistics from DB for all sensors")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Database connection error in get_all_latest_statistics_by_mode: {e}")
+        # Graceful fallback: return empty structure so frontend doesn't break
+        return {
+            'acceleration': {'stats': {}, 'frequencies': [], 'amplitudes': [], 'raw_values': [], 'raw_timestamps': []},
+            'current': {'stats': {}, 'frequencies': [], 'amplitudes': [], 'raw_values': [], 'raw_timestamps': []},
+            'audio': {'stats': {}, 'frequencies': [], 'amplitudes': [], 'raw_values': [], 'raw_timestamps': []}
+        }
+    finally:
+        if conn:
+            conn.close()
+
 def test_connection():
     """Test database connection"""
     conn = None

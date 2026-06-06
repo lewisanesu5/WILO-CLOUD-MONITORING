@@ -226,7 +226,7 @@ function App() {
     if (autoRefresh) {
       const interval = setInterval(() => {
         fetchSensorData(mode);
-      }, 5000); // Refresh every 5 seconds
+      }, 2 * 60 * 60 * 1000); // Refresh every 2 hours
       return () => clearInterval(interval);
     }
   }, [autoRefresh, mode]);
@@ -280,7 +280,7 @@ function App() {
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="w-4 h-4"
             />
-            <span>Auto-refresh every 5s</span>
+            <span>Auto-refresh every 2h</span>
           </label>
         </div>
       </div>

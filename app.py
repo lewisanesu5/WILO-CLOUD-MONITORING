@@ -11,7 +11,8 @@ from functools import wraps
 import hashlib
 import time
 from dotenv import load_dotenv
-from database import save_statistics, test_connection
+from database import save_statistics, test_connection, get_all_latest_statistics_by_mode
+from event_manager import EventManager
 
 load_dotenv()
 
@@ -47,8 +48,12 @@ except Exception as e:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'Data')
 UPLOAD_LOG_DIR = os.path.join(BASE_DIR, 'UploadLogs')
+EVENTS_DIR = os.path.join(BASE_DIR, 'Events')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_LOG_DIR, exist_ok=True)
+os.makedirs(EVENTS_DIR, exist_ok=True)
+
+event_manager = EventManager(EVENTS_DIR, DATA_DIR)
 
 # Sensor configuration
 SENSORS = ['acceleration', 'current', 'audio']
@@ -397,7 +402,7 @@ def load_all_sensor_data_with_modes():
 
 @app.route('/api/sensor-data')
 def get_sensor_data():
-    """Get all sensor data for all three modes."""
+    """Get all sensor data from the database."""
     api_start = time.time()
     try:
         mode = request.args.get('mode', 'max').lower()
@@ -405,13 +410,8 @@ def get_sensor_data():
         if mode not in ['max', 'min', 'combined']:
             return jsonify({'status': 'error', 'message': f'Invalid mode: {mode}'}), 400
         
-        sensor_data = load_all_sensor_data_with_modes()
-        
-        # Filter data for requested mode
-        filtered_data = {}
-        for sensor_name, modes in sensor_data.items():
-            if mode in modes:
-                filtered_data[sensor_name] = modes[mode]
+        # Fetch latest statistics from database instead of loading CSV files
+        sensor_data = get_all_latest_statistics_by_mode(mode)
         
         api_time = time.time() - api_start
         logger.info(f"🚀 /api/sensor-data ({mode}) response time: {api_time*1000:.1f}ms")
@@ -419,7 +419,7 @@ def get_sensor_data():
         return jsonify({
             'status': 'success',
             'mode': mode,
-            'data': filtered_data,
+            'data': sensor_data,
             'timestamp': dt.datetime.now().isoformat(),
             'response_time_ms': round(api_time * 1000, 2)
         })
@@ -706,6 +706,60 @@ def file_stats():
         })
     except Exception as e:
         logger.error(f'Error computing file stats for {filename}: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/create-event', methods=['POST'])
+def create_event():
+    """Create a new failure event with backward slope tracking."""
+    try:
+        data = request.get_json(silent=True) or {}
+        event_name = data.get('event_name')
+        failure_time_iso = data.get('failure_time_iso')
+        description = data.get('description', '')
+
+        if not event_name or not failure_time_iso:
+            return jsonify({'error': 'event_name and failure_time_iso are required'}), 400
+
+        result = event_manager.create_event(event_name, failure_time_iso, description)
+        return jsonify(result), 201
+    except Exception as e:
+        logger.error(f'Error creating event: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/events')
+def list_events():
+    """Return all saved failure events."""
+    try:
+        events = event_manager.list_events()
+        return jsonify({'events': events, 'count': len(events)})
+    except Exception as e:
+        logger.error(f'Error listing events: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/event/<event_id>')
+def get_event(event_id):
+    """Return one saved failure event."""
+    try:
+        event_data = event_manager.get_event(event_id)
+        if not event_data:
+            return jsonify({'error': 'Event not found'}), 404
+        return jsonify(event_data)
+    except Exception as e:
+        logger.error(f'Error getting event {event_id}: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/event-names')
+def get_event_names():
+    """Return unique event names for the frontend dropdown."""
+    try:
+        event_names = event_manager.get_unique_event_names()
+        return jsonify({'event_names': event_names, 'count': len(event_names)})
+    except Exception as e:
+        logger.error(f'Error getting event names: {e}')
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
