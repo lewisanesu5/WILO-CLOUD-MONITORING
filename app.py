@@ -935,26 +935,28 @@ def simulate_event():
         
         logger.info(f'Simulating event: {fault_type} at {event_time}')
         
-        # Copy max_*.csv files from fault folder to Data/
+        # Copy max_*.csv and min_*.csv files from fault folder to Data/
         copied_files = []
         param_types = ['acceleration', 'current', 'audio']
         
         for param in param_types:
+            # Copy MAX (fault) files
             source_file = os.path.join(fault_dir, f'max_{param}.csv')
+            if os.path.exists(source_file):
+                dest_filename = f'max_{param}.csv'
+                dest_file = os.path.join(DATA_DIR, dest_filename)
+                shutil.copy2(source_file, dest_file)
+                copied_files.append(dest_filename)
+                logger.info(f'Copied: {source_file} → {dest_file}')
             
-            if not os.path.exists(source_file):
-                logger.warning(f'File not found: {source_file}')
-                continue
-            
-            # Copy to Data directory with timestamp in filename
-            timestamp_str = dt.datetime.now().strftime('%Y%m%d_%H%M%S')
-            dest_filename = f'{timestamp_str}_max_{param}.csv'
-            dest_file = os.path.join(DATA_DIR, dest_filename)
-            
-            # Copy file
-            shutil.copy2(source_file, dest_file)
-            copied_files.append(dest_filename)
-            logger.info(f'Copied: {source_file} → {dest_file}')
+            # Copy MIN (baseline) files
+            source_file_min = os.path.join(fault_dir, f'min_{param}.csv')
+            if os.path.exists(source_file_min):
+                dest_filename_min = f'min_{param}.csv'
+                dest_file_min = os.path.join(DATA_DIR, dest_filename_min)
+                shutil.copy2(source_file_min, dest_file_min)
+                copied_files.append(dest_filename_min)
+                logger.info(f'Copied: {source_file_min} → {dest_file_min}')
         
         if not copied_files:
             return jsonify({'error': 'No sensor files found in fault directory'}), 404
