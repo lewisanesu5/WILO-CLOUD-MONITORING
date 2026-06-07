@@ -111,13 +111,21 @@ const EVENT_TYPES = [
  * Displays raw sensor data over time
  * - Plots individual sensor readings against timestamps
  * - Shows actual time series data, not aggregated statistics
+ * - PHASE 3: Can display fault current data when monitoring
  */
-function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
-  // Plot raw sensor values against time
-  const rawValues = sensorData?.raw_values || [];
-  const rawTimestamps = sensorData?.raw_timestamps || [];
+function TimeSeriesChart({ sensor, sensorData, onSensorChange, faultCurrentData = null, activeFault = null }) {
+  // Check if we're in fault monitoring mode
+  const isFaultMode = faultCurrentData && activeFault;
 
-  if (!sensorData || rawValues.length === 0) {
+  // Plot raw sensor values against time
+  const rawValues = isFaultMode 
+    ? (faultCurrentData?.values || []) 
+    : (sensorData?.raw_values || []);
+  const rawTimestamps = isFaultMode 
+    ? (faultCurrentData?.timestamps || []) 
+    : (sensorData?.raw_timestamps || []);
+
+  if ((!isFaultMode && (!sensorData || rawValues.length === 0)) || (isFaultMode && rawValues.length === 0)) {
     return (
       <div className="bg-white rounded-xl shadow-md p-8 h-full flex items-center justify-center">
         <p className="text-gray-400 text-center">No raw sensor data available</p>
@@ -130,18 +138,21 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
   const maxMs = relativeMs.length ? Math.max(...relativeMs) : 0;
   const labels = relativeMs.map((ms) => `${ms.toFixed(0)}ms`);
 
+  const currentSensor = isFaultMode ? (faultCurrentData?.sensor_type || 'acceleration') : sensor;
   const chartData = {
     labels,
     datasets: [
       {
-        label: `${sensor.charAt(0).toUpperCase() + sensor.slice(1)} Sensor Readings`,
+        label: isFaultMode 
+          ? `${currentSensor.charAt(0).toUpperCase() + currentSensor.slice(1)} - ${activeFault}` 
+          : `${sensor.charAt(0).toUpperCase() + sensor.slice(1)} Sensor Readings`,
         data: rawValues,
-        borderColor: '#06b6d4',
-        backgroundColor: 'rgba(6, 182, 212, 0.08)',
+        borderColor: isFaultMode ? '#ef4444' : '#06b6d4',
+        backgroundColor: isFaultMode ? 'rgba(239, 68, 68, 0.08)' : 'rgba(6, 182, 212, 0.08)',
         fill: true,
         tension: 0.3,
         pointRadius: 1,
-        pointBackgroundColor: '#06b6d4',
+        pointBackgroundColor: isFaultMode ? '#ef4444' : '#06b6d4',
         pointBorderColor: '#fff',
         pointBorderWidth: 1,
         pointHoverRadius: 4,
@@ -162,18 +173,18 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
         padding: 12,
         callbacks: {
           title: ([item]) => `Time: ${item.label}`,
-          label: (item) => `${sensor}: ${item.formattedValue}`
+          label: (item) => `${currentSensor}: ${item.formattedValue}`
         }
       }
     },
     scales: {
       y: {
-        title: { display: true, text: `${sensor} Value`, font: { size: 12, weight: '600', color: '#374151' } },
+        title: { display: true, text: `${currentSensor} Value`, font: { size: 12, weight: '600', color: '#374151' } },
         grid: { color: 'rgba(0,0,0,0.08)', drawBorder: false },
         ticks: { font: { size: 11, color: '#6b7280' } }
       },
       x: {
-        title: { display: true, text: 'Time (s)', font: { size: 12, weight: '600', color: '#374151' } },
+        title: { display: true, text: 'Time (ms)', font: { size: 12, weight: '600', color: '#374151' } },
         grid: { display: false, drawBorder: false },
         ticks: { font: { size: 11, color: '#6b7280' }, maxRotation: 0, minRotation: 0, autoSkip: true, maxTicksLimit: 8 }
       }
@@ -181,26 +192,31 @@ function TimeSeriesChart({ sensor, sensorData, onSensorChange }) {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-md p-6 flex flex-col h-full cursor-pointer" onDoubleClick={() => { /* placeholder for parent handler */ }}>
+    <div className={`${isFaultMode ? 'bg-gradient-to-br from-red-50 to-pink-50 border-l-4 border-red-500' : 'bg-white'} rounded-xl shadow-md p-6 flex flex-col h-full cursor-pointer transition duration-300`} onDoubleClick={() => { /* placeholder for parent handler */ }}>
       {/* Card Header */}
-      <div className="mb-6 pb-4 border-b-2 border-blue-200">
-        <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">📈 Time Series Analysis</h2>
+      <div className={`mb-6 pb-4 border-b-2 ${isFaultMode ? 'border-red-200' : 'border-blue-200'}`}>
+        <h2 className={`text-xl font-bold ${isFaultMode ? 'text-red-900' : 'text-gray-900'} mb-4 flex items-center gap-2`}>
+          {isFaultMode ? '🎯' : '📈'} Time Series Analysis
+          {isFaultMode && <span className="text-sm ml-2 px-2 py-1 bg-red-200 text-red-800 rounded-full">Live Fault</span>}
+        </h2>
         
         {/* Parameter Selector Dropdown */}
-        <div className="w-full">
-          <label className="block text-xs font-semibold text-gray-700 mb-1">Select Sensor:</label>
-          <select
-            value={sensor}
-            onChange={(e) => onSensorChange(e.target.value)}
-            className="w-40 h-10 bg-gradient-to-r from-gray-50 to-blue-50 text-gray-900 text-sm border-2 border-blue-300 rounded-lg px-3 py-2 font-medium shadow-sm hover:border-blue-500 hover:shadow-md focus:border-blue-600 focus:ring-2 focus:ring-blue-200 focus:outline-none transition duration-200 cursor-pointer"
-          >
-            {['acceleration', 'current', 'audio'].map(s => (
-              <option key={s} value={s} className="text-gray-900">
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
+        {!isFaultMode && (
+          <div className="w-full">
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Select Sensor:</label>
+            <select
+              value={sensor}
+              onChange={(e) => onSensorChange(e.target.value)}
+              className="w-40 h-10 bg-gradient-to-r from-gray-50 to-blue-50 text-gray-900 text-sm border-2 border-blue-300 rounded-lg px-3 py-2 font-medium shadow-sm hover:border-blue-500 hover:shadow-md focus:border-blue-600 focus:ring-2 focus:ring-blue-200 focus:outline-none transition duration-200 cursor-pointer"
+            >
+              {['acceleration', 'current', 'audio'].map(s => (
+                <option key={s} value={s} className="text-gray-900">
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Chart Container */}
@@ -241,104 +257,191 @@ function FullscreenModal({ open, onClose, title, children }) {
  * Displays parameter trends across 2-hour time windows
  * - Maintains original data processing and chart generation
  * - Enhanced with professional card and table styling
+ * - PHASE 3: Can display fault trend data when monitoring
  */
-function StatisticalAnalysisChart({ sensor, sensorData, selectedParam, historicalStats = [] }) {
-  // Use historicalStats (array of file stats ordered oldest->newest) when available
-  const frequencies = sensorData.frequencies || [];
-  const amplitudes = sensorData.amplitudes || [];
+function StatisticalAnalysisChart({ sensor, sensorData, selectedParam, historicalStats = [], faultTrendData = null, activeFault = null }) {
+  // Check if we're in fault monitoring mode
+  const isFaultMode = faultTrendData && activeFault && faultTrendData.intervals && faultTrendData.intervals.length > 0;
 
-  let paramLabel = selectedParam;
+  if (isFaultMode) {
+    // FAULT MODE: Display fault progression data
+    const intervals = faultTrendData.intervals;
+    
+    // Map intervals to chart data based on selected metric
+    let datasetLabel = 'Fault Progression - Acceleration RMS';
+    let datasetValues = [];
+    let borderColor = '#ef4444';
+    let backgroundColor = 'rgba(239, 68, 68, 0.08)';
+    let pointColor = '#ef4444';
 
-  const getParamFromEntry = (entry) => {
-    if (!entry) return 0;
+    // Use different metrics based on selection
+    if (selectedParam === 'mean' || selectedParam === 'kurtosis') {
+      datasetLabel = `Fault Progression - Accel ${selectedParam.toUpperCase()}`;
+      datasetValues = intervals.map(i => 
+        selectedParam === 'kurtosis' ? i.accel_kurtosis : (i.accel_std_dev || 0)
+      );
+    } else if (selectedParam === 'range' || selectedParam === 'std_dev') {
+      datasetLabel = `Fault Progression - ${selectedParam === 'range' ? 'Range' : 'Std Dev'}`;
+      datasetValues = intervals.map(i => i.accel_std_dev || 0);
+    } else {
+      // Default to RMS for other parameters
+      datasetValues = intervals.map(i => i.accel_rms || 0);
+    }
+
+    const labels = intervals.map(i => `Int ${i.interval}`);
+
+    const chartData = {
+      labels,
+      datasets: [
+        {
+          label: datasetLabel,
+          data: datasetValues,
+          borderColor,
+          backgroundColor,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 6,
+          pointBackgroundColor: pointColor,
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          borderWidth: 2.5
+        }
+      ]
+    };
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { 
+          display: true, 
+          position: 'top', 
+          labels: { padding: 16, font: { size: 12, weight: '600' } } 
+        }
+      },
+      scales: {
+        y: {
+          title: { display: true, text: 'Value', font: { size: 12, weight: '600' } },
+          grid: { color: 'rgba(0,0,0,0.05)' }
+        },
+        x: {
+          grid: { display: false }
+        }
+      }
+    };
+
+    return (
+      <div className="bg-gradient-to-br from-red-50 to-pink-50 rounded-xl shadow-lg overflow-hidden border-l-4 border-red-500 p-6 flex flex-col h-full hover:shadow-xl transition duration-200">
+        <div className="mb-6 pb-4 border-b-2 border-red-200">
+          <h2 className="text-xl font-bold text-red-900 mb-3 flex items-center gap-2">
+            🎯 Fault Event Trend Analysis
+            <span className="text-sm ml-2 px-2 py-1 bg-red-200 text-red-800 rounded-full">Live</span>
+          </h2>
+          <p className="text-sm text-red-700 font-medium">Fault: <span className="text-red-900 font-semibold">{activeFault}</span> | Intervals: <span className="text-red-900 font-semibold">{intervals.length}</span></p>
+        </div>
+        <div className="relative flex-1 min-h-[380px]">
+          <Line data={chartData} options={options} />
+        </div>
+      </div>
+    );
+  } else {
+    // ORIGINAL MODE: Display historical statistics
+    const frequencies = sensorData.frequencies || [];
+    const amplitudes = sensorData.amplitudes || [];
+
+    let paramLabel = selectedParam;
+
+    const getParamFromEntry = (entry) => {
+      if (!entry) return 0;
+      if (selectedParam.startsWith('frequency')) {
+        const idx = parseInt(selectedParam.replace('frequency', '')) - 1;
+        return entry.frequencies?.[idx] || 0;
+      }
+      if (selectedParam.startsWith('amplitude')) {
+        const idx = parseInt(selectedParam.replace('amplitude', '')) - 1;
+        return entry.amplitudes?.[idx] || 0;
+      }
+      return entry.stats?.[selectedParam] || 0;
+    };
+
     if (selectedParam.startsWith('frequency')) {
       const idx = parseInt(selectedParam.replace('frequency', '')) - 1;
-      return entry.frequencies?.[idx] || 0;
-    }
-    if (selectedParam.startsWith('amplitude')) {
+      paramLabel = `Frequency ${idx + 1}`;
+    } else if (selectedParam.startsWith('amplitude')) {
       const idx = parseInt(selectedParam.replace('amplitude', '')) - 1;
-      return entry.amplitudes?.[idx] || 0;
+      paramLabel = `Amplitude ${idx + 1}`;
     }
-    return entry.stats?.[selectedParam] || 0;
-  };
 
-  if (selectedParam.startsWith('frequency')) {
-    const idx = parseInt(selectedParam.replace('frequency', '')) - 1;
-    paramLabel = `Frequency ${idx + 1}`;
-  } else if (selectedParam.startsWith('amplitude')) {
-    const idx = parseInt(selectedParam.replace('amplitude', '')) - 1;
-    paramLabel = `Amplitude ${idx + 1}`;
-  }
+    // If we have >=2 historical points, plot them; otherwise show informative placeholder
+    const hasHistory = Array.isArray(historicalStats) && historicalStats.length >= 2;
 
-  // If we have >=2 historical points, plot them; otherwise show informative placeholder
-  const hasHistory = Array.isArray(historicalStats) && historicalStats.length >= 2;
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: true, position: 'top', labels: { padding: 16, font: { size: 12, weight: '600' } } }
-    },
-    scales: {
-      y: {
-        title: { display: true, text: 'Value', font: { size: 12, weight: '600' } },
-        grid: { color: 'rgba(0,0,0,0.05)' }
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top', labels: { padding: 16, font: { size: 12, weight: '600' } } }
       },
-      x: {
-        grid: { display: false }
+      scales: {
+        y: {
+          title: { display: true, text: 'Value', font: { size: 12, weight: '600' } },
+          grid: { color: 'rgba(0,0,0,0.05)' }
+        },
+        x: {
+          grid: { display: false }
+        }
       }
-    }
-  };
+    };
 
-  if (!hasHistory) {
-    return (
-      <div className="bg-white rounded-xl shadow-md p-8 h-full flex flex-col">
-        <div className="mb-6 pb-4 border-b-2 border-gray-100">
-          <h2 className="text-xl font-bold text-gray-900 mb-3">Statistical Trend Analysis</h2>
-          <p className="text-sm text-gray-600 font-medium">Parameter: <span className="text-blue-600 font-semibold">{paramLabel}</span></p>
-        </div>
-        <div className="flex-1 flex items-center justify-center text-gray-500">
-          <div className="text-center">
-            <p className="text-lg font-semibold">Insufficient historical data</p>
-            <p className="text-sm mt-2">We need at least two previous uploads to build a trend.</p>
+    if (!hasHistory) {
+      return (
+        <div className="bg-white rounded-xl shadow-md p-8 h-full flex flex-col">
+          <div className="mb-6 pb-4 border-b-2 border-gray-100">
+            <h2 className="text-xl font-bold text-gray-900 mb-3">Statistical Trend Analysis</h2>
+            <p className="text-sm text-gray-600 font-medium">Parameter: <span className="text-blue-600 font-semibold">{paramLabel}</span></p>
           </div>
+          <div className="flex-1 flex items-center justify-center text-gray-500">
+            <div className="text-center">
+              <p className="text-lg font-semibold">Insufficient historical data</p>
+              <p className="text-sm mt-2">We need at least two previous uploads to build a trend.</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const labels = historicalStats.map(h => h.file_timestamp ? new Date(h.file_timestamp).toLocaleString() : '—');
+    const datasetValues = historicalStats.map(h => Number(getParamFromEntry(h)));
+
+    const chartData = {
+      labels,
+      datasets: [
+        {
+          label: `${paramLabel} - Historical`,
+          data: datasetValues,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.08)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 6,
+          pointBackgroundColor: '#10b981',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2
+        }
+      ]
+    };
+
+    return (
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600 p-6 flex flex-col h-full hover:shadow-xl transition duration-200">
+        <div className="mb-6 pb-4 border-b-2 border-emerald-200">
+          <h2 className="text-xl font-bold text-gray-900 mb-3 flex items-center gap-2">📊 Statistical Trend Analysis</h2>
+          <p className="text-sm text-gray-600 font-medium">Parameter: <span className="text-emerald-600 font-semibold">{paramLabel}</span></p>
+        </div>
+        <div className="relative flex-1 min-h-[380px]">
+          <Line data={chartData} options={options} />
         </div>
       </div>
     );
   }
-
-  const labels = historicalStats.map(h => h.file_timestamp ? new Date(h.file_timestamp).toLocaleString() : '—');
-  const datasetValues = historicalStats.map(h => Number(getParamFromEntry(h)));
-
-  const chartData = {
-    labels,
-    datasets: [
-      {
-        label: `${paramLabel} - Historical`,
-        data: datasetValues,
-        borderColor: '#10b981',
-        backgroundColor: 'rgba(16, 185, 129, 0.08)',
-        fill: true,
-        tension: 0.3,
-        pointRadius: 6,
-        pointBackgroundColor: '#10b981',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2
-      }
-    ]
-  };
-
-  return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600 p-6 flex flex-col h-full hover:shadow-xl transition duration-200">
-      <div className="mb-6 pb-4 border-b-2 border-emerald-200">
-        <h2 className="text-xl font-bold text-gray-900 mb-3 flex items-center gap-2">📊 Statistical Trend Analysis</h2>
-        <p className="text-sm text-gray-600 font-medium">Parameter: <span className="text-emerald-600 font-semibold">{paramLabel}</span></p>
-      </div>
-      <div className="relative flex-1 min-h-[380px]">
-        <Line data={chartData} options={options} />
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -715,6 +818,27 @@ function App() {
   const [eventDescription, setEventDescription] = useState('');
   const [eventSubmitting, setEventSubmitting] = useState(false);
   const [events, setEvents] = useState([]);
+  
+  // Phase 2: Fault Event Monitoring
+  const [activeFault, setActiveFault] = useState(null);
+  const [faultTrendData, setFaultTrendData] = useState(null);
+  const [faultCurrentData, setFaultCurrentData] = useState(null);
+  const [eventMonitoringActive, setEventMonitoringActive] = useState(false);
+  const [eventFailureDetected, setEventFailureDetected] = useState(false);
+  const [eventIntervalCount, setEventIntervalCount] = useState(0);
+  const [faultStatusMessage, setFaultStatusMessage] = useState('');
+
+  // Phase 4: Sequential Fault Runner Control
+  const [sequentialRunnerActive, setSequentialRunnerActive] = useState(false);
+  const [sequentialRunnerStatus, setSequentialRunnerStatus] = useState('Ready');
+  const [sequentialRunnerProgress, setSequentialRunnerProgress] = useState({ current: 0, total: 1 });
+  const [selectedFaultForRunner, setSelectedFaultForRunner] = useState('Motor Stall');
+  const [currentFaultName, setCurrentFaultName] = useState('');
+  const [sequentialLogs, setSequentialLogs] = useState([]);
+  
+  // Countdown timer for next data point (30-second intervals)
+  const [countdownSeconds, setCountdownSeconds] = useState(0);
+  const [failureInfoDisplay, setFailureInfoDisplay] = useState(null);
 
   const openEventModal = () => {
     setEventModalOpen(true);
@@ -872,7 +996,107 @@ function App() {
     }
   }, [autoRefresh, mode]);
 
-  // Event handlers
+  // ======================== PHASE 2: FAULT EVENT MONITORING ========================
+  // Poll fault state every 30 seconds when activeFault is selected
+  useEffect(() => {
+    if (!activeFault) {
+      setEventMonitoringActive(false);
+      return;
+    }
+
+    setEventMonitoringActive(true);
+    setEventFailureDetected(false);
+    setFaultStatusMessage(`Starting monitoring for ${activeFault}...`);
+    setCountdownSeconds(0);
+    setFailureInfoDisplay(null);
+
+    let hasFailureOccurred = false;  // Track failure locally to avoid effect re-runs
+    let pollInterval = null;
+
+    const pollFaultData = async () => {
+      try {
+        // Fetch state and trend data in parallel
+        const [stateRes, trendRes, currentRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/fault-state/${activeFault}`),
+          fetch(`${API_BASE_URL}/api/fault-trend/${activeFault}`),
+          fetch(`${API_BASE_URL}/api/fault-current/${activeFault}?sensor=acceleration`)
+        ]);
+
+        if (stateRes.ok) {
+          const state = await stateRes.json();
+          setEventIntervalCount(state.interval_count || 0);
+          
+          // Display failure info when failure detected
+          if (state.system_failure_state && state.failure_interval && !hasFailureOccurred) {
+            hasFailureOccurred = true;
+            setFailureInfoDisplay({
+              interval: state.failure_interval,
+              message: `🔥 FAILURE DETECTED at interval ${state.failure_interval}`
+            });
+            setEventFailureDetected(true);
+            // Stop polling after failure is detected
+            if (pollInterval) {
+              clearInterval(pollInterval);
+              setEventMonitoringActive(false);
+            }
+          }
+          
+          setFaultStatusMessage(
+            state.system_failure_state 
+              ? `🔥 FAILURE at interval ${state.failure_interval}` 
+              : `📊 Interval ${state.interval_count} | ⏱️ Next in ${countdownSeconds}s`
+          );
+        }
+
+        if (trendRes.ok) {
+          const trend = await trendRes.json();
+          setFaultTrendData(trend);
+        }
+
+        if (currentRes.ok) {
+          const current = await currentRes.json();
+          setFaultCurrentData(current);
+        }
+        
+        // Reset countdown after successful poll (10 seconds until next)
+        setCountdownSeconds(10);
+      } catch (error) {
+        console.error('Polling error:', error);
+        setFaultStatusMessage('Polling stopped: Connection error');
+      }
+    };
+
+    // Poll immediately, then every 10 seconds
+    pollFaultData();
+    pollInterval = setInterval(pollFaultData, 10000);
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [activeFault]);
+
+  // Countdown timer for next data point (decrements every second)
+  useEffect(() => {
+    if (!activeFault) {
+      return;
+    }
+
+    const countdownInterval = setInterval(() => {
+      setCountdownSeconds(prev => {
+        if (prev <= 1) {
+          return 10; // Reset when reaches 0
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(countdownInterval);
+  }, [activeFault]);
+
+  // ======================== EVENT HANDLERS ========================
+
   const handleModeChange = (e) => {
     setMode(e.target.value);
   };
@@ -888,6 +1112,122 @@ function App() {
   const handleTimeSeriesSensorChange = (newSensor) => {
     setTimeSeriesSensor(newSensor);
   };
+
+  const handleFaultSelect = (faultName) => {
+    if (activeFault === faultName) {
+      setActiveFault(null);
+      setEventMonitoringActive(false);
+    } else {
+      setActiveFault(faultName);
+      setEventFailureDetected(false);
+      setEventIntervalCount(0);
+      setFaultTrendData(null);
+      setFaultCurrentData(null);
+    }
+  };
+
+  // ======================== SEQUENTIAL FAULT RUNNER FUNCTIONS ========================
+  
+  const startSequentialRunner = async () => {
+    try {
+      setSequentialRunnerActive(true);
+      setSequentialRunnerStatus('Starting...');
+      setSequentialLogs([]);
+      setSequentialRunnerProgress({ current: 0, total: 1 });
+      
+      // Set activeFault to enable plot data polling (30-second intervals)
+      setActiveFault(selectedFaultForRunner);
+      setEventFailureDetected(false);
+      setEventIntervalCount(0);
+      setFaultTrendData(null);
+      setFaultCurrentData(null);
+      
+      const response = await fetch(`${API_BASE_URL}/api/start-sequential-faults`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fault_name: selectedFaultForRunner
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to start fault');
+      }
+
+      setSequentialRunnerStatus('Running...');
+      setSequentialLogs([`✓ Starting ${selectedFaultForRunner}...`, '🔄 Generating fault data...', '📊 Plotting every 30 seconds...']);
+    } catch (error) {
+      console.error('Error starting sequential runner:', error);
+      setSequentialRunnerStatus(`Error: ${error.message}`);
+      setSequentialRunnerActive(false);
+      setActiveFault(null);
+    }
+  };
+
+  const stopSequentialRunner = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/stop-sequential-faults`, {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to stop sequential faults');
+      }
+
+      setSequentialRunnerActive(false);
+      setSequentialRunnerStatus('Stopped by user');
+      setSequentialLogs(prev => [...prev, '⏹️ Sequential runner stopped']);
+      setActiveFault(null);
+    } catch (error) {
+      console.error('Error stopping sequential runner:', error);
+    }
+  };
+
+  // Poll sequential fault runner status
+  useEffect(() => {
+    if (!sequentialRunnerActive) return;
+
+    const pollSequentialStatus = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/sequential-faults-status`);
+        if (response.ok) {
+          const status = await response.json();
+          
+          if (status) {
+            setSequentialRunnerStatus(status.status || 'Running');
+            setCurrentFaultName(status.current_fault || '');
+            setSequentialRunnerProgress({
+              current: status.current_fault_number || 0,
+              total: status.total_faults || 11
+            });
+
+            // Update logs
+            if (status.last_log) {
+              setSequentialLogs(prev => {
+                const newLogs = [...prev, status.last_log];
+                return newLogs.slice(-8); // Keep last 8 logs
+              });
+            }
+
+            // Check if completed
+            if (status.status === 'completed' || status.status === 'stopped') {
+              setSequentialRunnerActive(false);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error polling sequential status:', error);
+      }
+    };
+
+    // Poll every 2 seconds for responsive UI
+    const interval = setInterval(pollSequentialStatus, 2000);
+    return () => clearInterval(interval);
+  }, [sequentialRunnerActive]);
 
   const openModal = (title, content) => {
     setModalTitle(title);
@@ -1035,6 +1375,159 @@ function App() {
                 </div>
               </div>
 
+
+
+              {/* SEQUENTIAL FAULT RUNNER CARD - Phase 4 (UPDATED) */}
+              <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-orange-600 hover:shadow-xl transition duration-200">
+                <div className="bg-gradient-to-r from-orange-600 via-amber-500 to-yellow-500 px-6 py-4 border-b-2 border-orange-400">
+                  <h2 className="text-lg font-bold text-white">⚡ Run Selected Fault</h2>
+                  <p className="text-xs text-orange-100 mt-1">Run a single fault from start with fresh intervals</p>
+                </div>
+                <div className="p-5 space-y-4">
+                  {/* Fault Selector Dropdown */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-2">Select Fault to Run:</label>
+                    <select
+                      value={selectedFaultForRunner}
+                      onChange={(e) => setSelectedFaultForRunner(e.target.value)}
+                      disabled={sequentialRunnerActive}
+                      className="w-full h-10 bg-gradient-to-r from-gray-50 to-orange-50 text-gray-900 text-sm border-2 border-orange-300 rounded-lg px-3 py-2 font-medium shadow-sm disabled:opacity-60 disabled:cursor-not-allowed focus:border-orange-600 focus:ring-2 focus:ring-orange-200 focus:outline-none transition duration-200"
+                    >
+                      {/* Motor Failures */}
+                      <optgroup label="⚙️ Motor Failures">
+                        <option value="Motor Stall">Motor Stall</option>
+                        <option value="Motor Bearing Failure">Motor Bearing Failure</option>
+                        <option value="Motor Overheating">Motor Overheating</option>
+                        <option value="Motor Winding Failure">Motor Winding Failure</option>
+                        <option value="Motor Shaft Misalignment">Motor Shaft Misalignment</option>
+                        <option value="Motor Vibration Anomaly">Motor Vibration Anomaly</option>
+                        <option value="Motor Electrical Fault">Motor Electrical Fault</option>
+                      </optgroup>
+                      {/* Pump Failures */}
+                      <optgroup label="💧 Pump Failures">
+                        <option value="Pump Seal Leakage">Pump Seal Leakage</option>
+                        <option value="Pump Cavitation">Pump Cavitation</option>
+                        <option value="Pump Impeller Damage">Pump Impeller Damage</option>
+                      </optgroup>
+                      {/* Other */}
+                      <optgroup label="📌 Other">
+                        <option value="Custom Event">Custom Event</option>
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  {/* Control Buttons */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => startSequentialRunner()}
+                      disabled={sequentialRunnerActive}
+                      className="flex-1 h-10 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg transition duration-200 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                    >
+                      ▶️ Start
+                    </button>
+                    <button
+                      onClick={stopSequentialRunner}
+                      disabled={!sequentialRunnerActive}
+                      className="flex-1 h-10 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg transition duration-200 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                    >
+                      ⏹️ Stop
+                    </button>
+                  </div>
+
+                  {/* Status Display */}
+                  {sequentialRunnerActive && (
+                    <div className="p-4 bg-gradient-to-br from-orange-50 to-yellow-50 border-l-4 border-orange-600 rounded-lg space-y-3">
+                      {/* Progress Bar */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs font-bold text-orange-900">Progress</p>
+                          <p className="text-xs font-bold text-orange-700">Running...</p>
+                        </div>
+                        <div className="w-full h-2 bg-orange-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-orange-500 to-red-500 animate-pulse"
+                            style={{ width: '100%' }}
+                          ></div>
+                        </div>
+                      </div>
+
+                      {/* Current Fault */}
+                      {currentFaultName && (
+                        <div className="p-3 bg-white rounded border-l-4 border-orange-500">
+                          <p className="text-xs font-semibold text-gray-500">Current Fault:</p>
+                          <p className="text-sm font-bold text-orange-900 mt-1">{currentFaultName}</p>
+                        </div>
+                      )}
+
+                      {/* Status Message */}
+                      <p className="text-xs text-orange-700 font-mono bg-orange-100 px-2 py-1 rounded">
+                        {sequentialRunnerStatus}
+                      </p>
+
+                      {/* Countdown Timer */}
+                      {sequentialRunnerActive && !eventFailureDetected && (
+                        <div className="p-3 bg-blue-50 border-l-4 border-blue-600 rounded">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-blue-700">Next Data Point In:</p>
+                            <p className="text-xl font-bold text-blue-600">{countdownSeconds}s</p>
+                          </div>
+                          <div className="w-full h-2 bg-blue-200 rounded-full overflow-hidden mt-2">
+                            <div 
+                              className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-1000"
+                              style={{ width: `${(countdownSeconds / 30) * 100}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Failure Info Display */}
+                      {failureInfoDisplay && (
+                        <div className="p-3 bg-red-50 border-l-4 border-red-600 rounded">
+                          <p className="text-xs font-bold text-red-700 mb-1">⚠️ FAILURE DETECTED</p>
+                          <p className="text-sm font-bold text-red-900">Interval {failureInfoDisplay.interval}</p>
+                          <p className="text-xs text-red-600 mt-1">System failure detected. Simulation stopped.</p>
+                        </div>
+                      )}
+
+                      {/* Live Logs */}
+                      {sequentialLogs.length > 0 && (
+                        <div className="p-3 bg-gray-900 rounded border border-gray-700 max-h-32 overflow-y-auto">
+                          <div className="space-y-1">
+                            {sequentialLogs.map((log, idx) => (
+                              <p key={idx} className="text-xs font-mono text-green-400">
+                                {log}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Idle State Info */}
+                  {!sequentialRunnerActive && sequentialLogs.length === 0 && (
+                    <div className="p-4 bg-blue-50 border-l-4 border-blue-600 rounded-lg">
+                      <p className="text-xs text-blue-700 font-semibold mb-2">How it works:</p>
+                      <ul className="text-xs text-blue-600 space-y-1 ml-2">
+                        <li>✓ Select a fault from the dropdown</li>
+                        <li>✓ Click [▶️ Start] to run it</li>
+                        <li>✓ Intervals reset to 1-15 (fresh)</li>
+                        <li>✓ Fault detection within 5-15 range</li>
+                        <li>✓ Data auto-reset before running</li>
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Completed State */}
+                  {!sequentialRunnerActive && sequentialLogs.length > 0 && sequentialRunnerStatus === 'completed' && (
+                    <div className="p-4 bg-green-100 border-l-4 border-green-600 rounded-lg">
+                      <p className="text-sm font-bold text-green-900">✓ Sequence Completed!</p>
+                      <p className="text-xs text-green-700 mt-1">All faults have been generated and monitored.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* FILE HISTORY CARD */}
               <FileHistoryTable files={fileHistory} sensor={selectedSensor} />
 
@@ -1068,6 +1561,8 @@ function App() {
                       sensor={timeSeriesSensor}
                       sensorData={sensorData[timeSeriesSensor] || {}}
                       onSensorChange={handleTimeSeriesSensorChange}
+                      faultCurrentData={faultCurrentData}
+                      activeFault={activeFault}
                     />
                   </div>
                 ))}>
@@ -1075,6 +1570,8 @@ function App() {
                     sensor={timeSeriesSensor} 
                     sensorData={sensorData[timeSeriesSensor] || {}}
                     onSensorChange={handleTimeSeriesSensorChange}
+                    faultCurrentData={faultCurrentData}
+                    activeFault={activeFault}
                   />
                 </div>
               </div>
@@ -1109,6 +1606,8 @@ function App() {
                         sensorData={sensorData[timeSeriesSensor] || {}}
                         selectedParam={selectedParam}
                         historicalStats={historicalStats}
+                        faultTrendData={faultTrendData}
+                        activeFault={activeFault}
                       />
                     </div>
                   ))} className="relative min-h-[320px]">
@@ -1117,6 +1616,8 @@ function App() {
                       sensorData={sensorData[timeSeriesSensor] || {}}
                       selectedParam={selectedParam}
                       historicalStats={historicalStats}
+                      faultTrendData={faultTrendData}
+                      activeFault={activeFault}
                     />
                   </div>
                 </div>

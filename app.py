@@ -4,6 +4,7 @@ import os
 import glob
 import csv
 import shutil
+import json
 import numpy as np
 from scipy import stats
 import datetime as dt
@@ -11,6 +12,8 @@ import logging
 from functools import wraps
 import hashlib
 import time
+import multiprocessing
+import threading
 from dotenv import load_dotenv
 from database import save_statistics, test_connection, get_all_latest_statistics_by_mode
 from event_manager import EventManager
@@ -29,7 +32,14 @@ ALLOWED_ORIGINS = [
     # "https://your-domain.com",
     # "https://your-domain.onrender.com"
 ]
-CORS(app, origins=ALLOWED_ORIGINS)
+
+# Configure CORS with explicit options
+CORS(app, 
+     origins=ALLOWED_ORIGINS,
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+     allow_headers=['Content-Type', 'Authorization'],
+     supports_credentials=False,
+     max_age=3600)
 
 # Configure logging
 logging.basicConfig(
@@ -55,6 +65,42 @@ os.makedirs(UPLOAD_LOG_DIR, exist_ok=True)
 os.makedirs(EVENTS_DIR, exist_ok=True)
 
 event_manager = EventManager(EVENTS_DIR, DATA_DIR)
+
+# ======================== REQUEST LOGGING FOR DEBUGGING ========================
+@app.before_request
+def log_request():
+    """Log all incoming requests with headers for CORS debugging"""
+    logger.info(f"{'='*60}")
+    logger.info(f"REQUEST: {request.method} {request.path}")
+    logger.info(f"Origin: {request.headers.get('Origin', 'N/A')}")
+    logger.info(f"Content-Type: {request.headers.get('Content-Type', 'N/A')}")
+    if request.method == 'OPTIONS':
+        logger.info(f"PREFLIGHT REQUEST DETECTED")
+        logger.info(f"Access-Control-Request-Method: {request.headers.get('Access-Control-Request-Method', 'N/A')}")
+        logger.info(f"Access-Control-Request-Headers: {request.headers.get('Access-Control-Request-Headers', 'N/A')}")
+    logger.info(f"{'='*60}")
+
+@app.after_request
+def log_response(response):
+    """Log response headers for CORS debugging"""
+    logger.info(f"RESPONSE: {response.status}")
+    logger.info(f"Access-Control-Allow-Origin: {response.headers.get('Access-Control-Allow-Origin', 'NOT SET')}")
+    logger.info(f"Access-Control-Allow-Methods: {response.headers.get('Access-Control-Allow-Methods', 'NOT SET')}")
+    logger.info(f"Access-Control-Allow-Headers: {response.headers.get('Access-Control-Allow-Headers', 'NOT SET')}")
+    return response
+
+# ======================== SEQUENTIAL FAULT RUNNER STATE ========================
+sequential_runner_state = {
+    'active': False,
+    'status': 'idle',
+    'current_fault': '',
+    'current_fault_number': 0,
+    'total_faults': 11,
+    'cycles': 1,
+    'last_log': '',
+    'process': None,
+    'lock': threading.Lock()
+}
 
 # Sensor configuration
 SENSORS = ['acceleration', 'current', 'audio']
@@ -1066,23 +1112,382 @@ def get_event_names():
         logger.error(f'Error getting event names: {e}')
         return jsonify({'error': str(e)}), 500
 
+
+# ==================== PHASE 1: NEW FAULT MONITORING ENDPOINTS ====================
+
+@app.route('/api/fault-state/<fault_name>', methods=['GET'])
+def get_fault_state(fault_name):
+    """
+    Get current state of a fault event from generated stats file.
+    Returns interval count, system_failure_state, and current statistics.
+    Returns 200 OK with initial data if generating but no data yet (waiting for first interval).
+    """
+    try:
+        events_dir = os.path.join(EVENTS_DIR, fault_name)
+        stats_file = os.path.join(events_dir, 'stats.json')
+        
+        if not os.path.exists(stats_file):
+            # Fault generation might be starting, return initial/waiting state
+            import time
+            return jsonify({
+                'fault_name': fault_name,
+                'interval_count': 0,
+                'system_failure_state': False,
+                'failure_interval': None,
+                'is_generating': True,  # Still waiting for first data
+                'current_stats': {},
+                'start_time': None,
+                'current_time': time.time(),
+                'message': 'Waiting for first interval...'
+            }), 200
+        
+        with open(stats_file, 'r') as f:
+            stats_data = json.load(f)
+        
+        current_stats = {}
+        if stats_data.get('intervals'):
+            current_stats = stats_data['intervals'][-1]  # Get latest interval
+        
+        return jsonify({
+            'fault_name': fault_name,
+            'interval_count': stats_data.get('interval_count', 0),
+            'system_failure_state': stats_data.get('system_failure_state', False),
+            'failure_interval': stats_data.get('failure_interval'),
+            'is_generating': not stats_data.get('system_failure_state', True),
+            'current_stats': current_stats,
+            'start_time': stats_data.get('start_time'),
+            'current_time': stats_data.get('current_time')
+        }), 200
+    except Exception as e:
+        logger.error(f'Error getting fault state for {fault_name}: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/fault-trend/<fault_name>', methods=['GET'])
+def get_fault_trend(fault_name):
+    """
+    Get historical trend data (all intervals) for a fault event.
+    Returns array of intervals with statistics for trend plotting.
+    Returns 200 OK with empty intervals if generating but no data yet.
+    """
+    try:
+        events_dir = os.path.join(EVENTS_DIR, fault_name)
+        stats_file = os.path.join(events_dir, 'stats.json')
+        
+        if not os.path.exists(stats_file):
+            # Fault generation might be starting, return empty but valid response
+            import time
+            return jsonify({
+                'fault_name': fault_name,
+                'intervals': [],
+                'failure_interval': None,
+                'system_failure_state': False,
+                'start_time': None,
+                'current_time': time.time(),
+                'message': 'Waiting for data...'
+            }), 200
+        
+        with open(stats_file, 'r') as f:
+            stats_data = json.load(f)
+        
+        # Extract key statistics per interval for trend graphing
+        intervals = []
+        for interval_data in stats_data.get('intervals', []):
+            interval_num = interval_data.get('interval')
+            accel_stats = interval_data.get('acceleration', {})
+            current_stats = interval_data.get('current', {})
+            audio_stats = interval_data.get('audio', {})
+            
+            intervals.append({
+                'interval': interval_num,
+                'timestamp': interval_data.get('timestamp'),
+                'system_failure_state': interval_data.get('system_failure_state', False),
+                # Acceleration metrics
+                'accel_rms': accel_stats.get('rms', 0),
+                'accel_max': accel_stats.get('max', 0),
+                'accel_kurtosis': accel_stats.get('kurtosis', 0),
+                'accel_std_dev': accel_stats.get('std_dev', 0),
+                # Current metrics
+                'current_mean': current_stats.get('mean', 0),
+                'current_max': current_stats.get('max', 0),
+                # Audio metrics
+                'audio_mean': audio_stats.get('mean', 0),
+                'audio_max': audio_stats.get('max', 0)
+            })
+        
+        return jsonify({
+            'fault_name': fault_name,
+            'start_time': stats_data.get('start_time'),
+            'current_time': stats_data.get('current_time'),
+            'intervals': intervals,
+            'failure_interval': stats_data.get('failure_interval'),
+            'system_failure_state': stats_data.get('system_failure_state', False),
+            'fault_type': 'SUDDEN' if (stats_data.get('failure_interval') or 99) < 10 else 'GRADUAL'
+        }), 200
+    except Exception as e:
+        logger.error(f'Error getting fault trend for {fault_name}: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/fault-current/<fault_name>', methods=['GET'])
+def get_fault_current(fault_name):
+    """
+    Get current interval's time series data (raw timestamps/values).
+    Returns raw data for time series chart plotting.
+    """
+    try:
+        sensor_type = request.args.get('sensor', 'acceleration')
+        if sensor_type not in SENSORS:
+            sensor_type = 'acceleration'
+        
+        data_dir = os.path.join(DATA_DIR, fault_name)
+        if not os.path.exists(data_dir):
+            return jsonify({
+                'fault_name': fault_name,
+                'sensor_type': sensor_type,
+                'message': 'No data directory found'
+            }), 404
+        
+        # Load max file (represents current fault state)
+        timestamps, values, file_ts = load_csv_data(f'{fault_name}/max_{sensor_type}.csv')
+        
+        if not timestamps or not values:
+            return jsonify({
+                'fault_name': fault_name,
+                'sensor_type': sensor_type,
+                'timestamps': [],
+                'values': []
+            }), 200
+        
+        # Normalize timestamps to 0-2000ms window
+        if timestamps:
+            start_ts = min(timestamps)
+            relative_timestamps = [ts - start_ts for ts in timestamps]
+        else:
+            relative_timestamps = timestamps
+        
+        return jsonify({
+            'fault_name': fault_name,
+            'sensor_type': sensor_type,
+            'timestamps': relative_timestamps,
+            'values': values,
+            'file_timestamp': file_ts,
+            'data_points': len(values)
+        }), 200
+    except Exception as e:
+        logger.error(f'Error getting fault current data for {fault_name}: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+# ======================== SEQUENTIAL FAULT RUNNER ENDPOINTS ========================
+
+@app.route('/api/start-sequential-faults', methods=['POST'])
+def start_sequential_faults():
+    """
+    Start a single fault generator.
+    Runs the selected fault with fresh data and interval reset.
+    """
+    try:
+        data = request.get_json() or {}
+        fault_name = data.get('fault_name', 'Motor Stall')
+
+        with sequential_runner_state['lock']:
+            # Check if process is actually still running
+            if sequential_runner_state['active']:
+                process = sequential_runner_state['process']
+                # If process exists, check if it's still alive
+                if process and process.poll() is not None:
+                    # Process has finished, reset the state
+                    logger.info(f"Previous process finished, resetting state")
+                    sequential_runner_state['active'] = False
+                    sequential_runner_state['process'] = None
+                    sequential_runner_state['status'] = 'idle'
+                else:
+                    # Process still running
+                    return jsonify({'error': 'Fault runner already active'}), 409
+
+            # Import here to avoid circular imports
+            import subprocess
+            import sys
+
+            # Start the fault runner in a subprocess with fault name as argument
+            cmd = [
+                sys.executable,
+                'run_sequence_generator.py',
+                '--fault',
+                fault_name
+            ]
+
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.PIPE,
+                    text=True,
+                    cwd=BASE_DIR
+                )
+
+                sequential_runner_state['active'] = True
+                sequential_runner_state['status'] = 'running'
+                sequential_runner_state['process'] = process
+                sequential_runner_state['current_fault'] = fault_name
+                sequential_runner_state['current_fault_number'] = 1
+                sequential_runner_state['total_faults'] = 1
+                sequential_runner_state['last_log'] = f'✓ Running {fault_name}...'
+
+                logger.info(f"Fault generator started for: {fault_name}")
+                
+                # Start background thread to monitor subprocess completion
+                def monitor_subprocess():
+                    """Monitor subprocess and reset active flag when done."""
+                    try:
+                        process.wait()  # Wait for process to complete
+                        with sequential_runner_state['lock']:
+                            sequential_runner_state['active'] = False
+                            sequential_runner_state['status'] = 'completed'
+                            sequential_runner_state['process'] = None
+                        logger.info(f"Fault generator completed for: {fault_name}")
+                    except Exception as e:
+                        logger.error(f"Error monitoring subprocess: {e}")
+                        with sequential_runner_state['lock']:
+                            sequential_runner_state['active'] = False
+                            sequential_runner_state['process'] = None
+                
+                monitor_thread = threading.Thread(target=monitor_subprocess, daemon=True)
+                monitor_thread.start()
+
+                return jsonify({
+                    'status': 'started',
+                    'message': f'Fault generator started for {fault_name}',
+                    'fault_name': fault_name,
+                    'pid': process.pid
+                }), 200
+
+            except Exception as e:
+                logger.error(f"Failed to start fault generator: {e}")
+                sequential_runner_state['active'] = False
+                sequential_runner_state['process'] = None
+                return jsonify({'error': f'Failed to start process: {str(e)}'}), 500
+
+    except Exception as e:
+        logger.error(f'Error starting fault generator: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/stop-sequential-faults', methods=['POST'])
+def stop_sequential_faults():
+    """
+    Stop the sequential fault runner process.
+    """
+    try:
+        with sequential_runner_state['lock']:
+            process = sequential_runner_state['process']
+            
+            if not process or not sequential_runner_state['active']:
+                return jsonify({'error': 'No active sequential runner'}), 404
+
+            try:
+                # Send Ctrl+C to the process
+                process.terminate()
+                process.wait(timeout=5)
+                
+                sequential_runner_state['active'] = False
+                sequential_runner_state['status'] = 'stopped'
+                sequential_runner_state['last_log'] = '⏹️ Stopped by user'
+
+                logger.info("Sequential fault runner stopped")
+
+                return jsonify({
+                    'status': 'stopped',
+                    'message': 'Sequential fault runner stopped successfully'
+                }), 200
+
+            except subprocess.TimeoutExpired:
+                # Force kill if terminate doesn't work
+                process.kill()
+                sequential_runner_state['active'] = False
+                sequential_runner_state['status'] = 'killed'
+                
+                return jsonify({
+                    'status': 'killed',
+                    'message': 'Sequential fault runner force terminated'
+                }), 200
+
+    except Exception as e:
+        logger.error(f'Error stopping sequential faults: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sequential-faults-status', methods=['GET'])
+def get_sequential_faults_status():
+    """
+    Get the current status of the sequential fault runner.
+    Used by frontend for polling and progress updates.
+    """
+    try:
+        status_file = os.path.join(BASE_DIR, '.sequential_runner_status.json')
+        
+        # Try to read status from file (written by run_sequence_generator.py)
+        if os.path.exists(status_file):
+            try:
+                with open(status_file, 'r') as f:
+                    return jsonify(json.load(f)), 200
+            except:
+                pass
+
+        # Return default state if file doesn't exist or can't be read
+        with sequential_runner_state['lock']:
+            status_dict = {
+                'active': sequential_runner_state['active'],
+                'status': sequential_runner_state['status'],
+                'current_fault': sequential_runner_state['current_fault'],
+                'current_fault_number': sequential_runner_state['current_fault_number'],
+                'total_faults': sequential_runner_state['total_faults'],
+                'cycles': sequential_runner_state['cycles'],
+                'last_log': sequential_runner_state['last_log']
+            }
+
+            # Check if process is still running
+            if sequential_runner_state['process'] and sequential_runner_state['active']:
+                poll_result = sequential_runner_state['process'].poll()
+                if poll_result is not None:  # Process has terminated
+                    sequential_runner_state['active'] = False
+                    sequential_runner_state['status'] = 'completed'
+                    status_dict['status'] = 'completed'
+                    logger.info("Sequential fault runner process completed")
+
+            return jsonify(status_dict), 200
+
+    except Exception as e:
+        logger.error(f'Error getting sequential faults status: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+# ======================== HELPER FUNCTION FOR SEQUENTIAL RUNNER ========================
+
+def update_sequential_runner_status(fault_name, fault_number, log_message):
+    """
+    Update the sequential runner state (called from run_sequence_generator.py)
+    """
+    with sequential_runner_state['lock']:
+        sequential_runner_state['current_fault'] = fault_name
+        sequential_runner_state['current_fault_number'] = fault_number
+        sequential_runner_state['last_log'] = log_message
+        logger.info(f"Sequential runner: {fault_name} ({fault_number}/11) - {log_message}")
+
+
 if __name__ == '__main__':
     print(' * Starting Predictive Maintenance Backend...')
-    from flask_socketio import SocketIO
     
     # Get port from environment variable or default to 5001
     port = int(os.environ.get('PORT', 5001))
     debug_mode = os.environ.get('FLASK_ENV', 'development') == 'development'
     
-    socketio = SocketIO(
-        app,
-        cors_allowed_origins=ALLOWED_ORIGINS,
-        async_mode='threading'
-    )
-    socketio.run(
-        app,
+    # Use Flask's built-in run method (simpler, better CORS support for HTTP)
+    app.run(
         host='0.0.0.0',
         port=port,
         debug=debug_mode,
-        allow_unsafe_werkzeug=True
+        use_reloader=False
     )

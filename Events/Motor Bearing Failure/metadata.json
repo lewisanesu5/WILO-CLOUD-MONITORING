@@ -1,0 +1,8 @@
+{
+  "fault_name": "Motor Bearing Failure",
+  "start_time": "2026-06-08T01:03:44.918133",
+  "end_time": null,
+  "failure_interval": null,
+  "system_failure_state": false,
+  "intervals": []
+}
