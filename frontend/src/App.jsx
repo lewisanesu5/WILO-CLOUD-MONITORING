@@ -675,18 +675,30 @@ function EventModal({
 
 /**
  * EnhancedStatisticsTable Component
- * Displays all sensor statistics, frequencies, and amplitudes
+ * Displays database statistics for selected sensor
+ * - Shows latest data from PostgreSQL database
  * - Professional table design with sticky headers
  * - Improved readability with proper typography hierarchy
- * - All data combined in single organized table
  */
-function EnhancedStatisticsTable({ sensorData, selectedSensor, mode }) {
+function EnhancedStatisticsTable({ dbStats, selectedSensor, mode }) {
+  const sensorStats = dbStats[selectedSensor];
+
+  if (!sensorStats) {
+    return (
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600 p-6">
+        <div className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-6 py-5 border-b-2 border-emerald-400 mb-4 -mx-6 -mt-6">
+          <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">📊 Database Statistics</h3>
+        </div>
+        <p className="text-gray-400 text-center py-8">No database statistics available for {selectedSensor}</p>
+      </div>
+    );
+  }
+
   const parameters = [
     { key: 'mean', label: 'Mean' },
     { key: 'max', label: 'Max' },
     { key: 'min', label: 'Min' },
     { key: 'std_dev', label: 'Standard Deviation' },
-    { key: 'range', label: 'Range' },
     { key: 'skewness', label: 'Skewness' },
     { key: 'kurtosis', label: 'Kurtosis' },
     { key: 'frequency1', label: 'Frequency 1 (Hz)' },
@@ -701,34 +713,14 @@ function EnhancedStatisticsTable({ sensorData, selectedSensor, mode }) {
     { key: 'amplitude5', label: 'Amplitude 5' }
   ];
 
-  const data = sensorData[selectedSensor] || {};
-  const stats = data.stats || {};
-  const frequencies = data.frequencies || [];
-  const amplitudes = data.amplitudes || [];
-
-  // Create combined data object (unchanged logic)
-  const allData = {
-    ...stats,
-    frequency1: frequencies[0],
-    frequency2: frequencies[1],
-    frequency3: frequencies[2],
-    frequency4: frequencies[3],
-    frequency5: frequencies[4],
-    amplitude1: amplitudes[0],
-    amplitude2: amplitudes[1],
-    amplitude3: amplitudes[2],
-    amplitude4: amplitudes[3],
-    amplitude5: amplitudes[4]
-  };
-
   return (
     <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-full border-l-4 border-emerald-600 hover:shadow-xl transition duration-200">
       {/* Card Header */}
       <div className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-6 py-5 border-b-2 border-emerald-400">
-        <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">📊 Statistical Analysis Table</h3>
+        <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">📊 Database Statistics</h3>
         <p className="text-xs text-emerald-100">
           Sensor: <span className="font-semibold capitalize bg-emerald-700 bg-opacity-50 px-2 py-1 rounded">{selectedSensor}</span> • 
-          Mode: <span className="font-semibold uppercase bg-emerald-700 bg-opacity-50 px-2 py-1 rounded">{mode}</span>
+          Last Updated: <span className="font-semibold bg-emerald-700 bg-opacity-50 px-2 py-1 rounded">{sensorStats.timestamp ? new Date(sensorStats.timestamp).toLocaleString() : 'N/A'}</span>
         </p>
       </div>
 
@@ -757,8 +749,8 @@ function EnhancedStatisticsTable({ sensorData, selectedSensor, mode }) {
                     {param.label}
                   </td>
                   <td className="px-5 py-3 text-right font-bold text-gray-900 tabular-nums">
-                    {allData[param.key] !== undefined && allData[param.key] !== null 
-                      ? (typeof allData[param.key] === 'number' ? allData[param.key].toFixed(4) : allData[param.key])
+                    {sensorStats[param.key] !== undefined && sensorStats[param.key] !== null 
+                      ? (typeof sensorStats[param.key] === 'number' ? sensorStats[param.key].toFixed(4) : sensorStats[param.key])
                       : '—'}
                   </td>
                 </tr>
@@ -773,66 +765,6 @@ function EnhancedStatisticsTable({ sensorData, selectedSensor, mode }) {
 
 
 
-
-/**
- * DatabaseStatsCard Component
- * Displays latest statistics fetched from PostgreSQL database
- */
-function DatabaseStatsCard({ dbStats, sensor }) {
-  const stats = dbStats[sensor];
-
-  if (!stats) {
-    return (
-      <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-blue-600 p-6 h-full flex items-center justify-center">
-        <p className="text-gray-400 text-center">No database statistics available for {sensor}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-blue-600 hover:shadow-xl transition duration-200">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 px-6 py-4 border-b-2 border-blue-400">
-        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          🗄️ Database Statistics
-        </h3>
-        <p className="text-xs text-blue-100 mt-1">
-          Latest from PostgreSQL • {stats.timestamp ? new Date(stats.timestamp).toLocaleString() : 'N/A'}
-        </p>
-      </div>
-
-      {/* Content */}
-      <div className="p-5">
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-3 rounded-lg border border-blue-200">
-            <p className="text-blue-600 font-semibold text-xs">Mean</p>
-            <p className="text-xl font-bold text-blue-900">{stats.mean?.toFixed(4) || '—'}</p>
-          </div>
-          <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-3 rounded-lg border border-green-200">
-            <p className="text-green-600 font-semibold text-xs">Std Dev</p>
-            <p className="text-xl font-bold text-green-900">{stats.std_dev?.toFixed(4) || '—'}</p>
-          </div>
-          <div className="bg-gradient-to-br from-purple-50 to-pink-50 p-3 rounded-lg border border-purple-200">
-            <p className="text-purple-600 font-semibold text-xs">Min</p>
-            <p className="text-lg font-bold text-purple-900">{stats.min?.toFixed(4) || '—'}</p>
-          </div>
-          <div className="bg-gradient-to-br from-orange-50 to-red-50 p-3 rounded-lg border border-orange-200">
-            <p className="text-orange-600 font-semibold text-xs">Max</p>
-            <p className="text-lg font-bold text-orange-900">{stats.max?.toFixed(4) || '—'}</p>
-          </div>
-          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-3 rounded-lg border border-indigo-200">
-            <p className="text-indigo-600 font-semibold text-xs">Skewness</p>
-            <p className="text-lg font-bold text-indigo-900">{stats.skewness?.toFixed(4) || '—'}</p>
-          </div>
-          <div className="bg-gradient-to-br from-pink-50 to-rose-50 p-3 rounded-lg border border-pink-200">
-            <p className="text-pink-600 font-semibold text-xs">Kurtosis</p>
-            <p className="text-lg font-bold text-pink-900">{stats.kurtosis?.toFixed(4) || '—'}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 
 
@@ -1350,20 +1282,12 @@ function App() {
               {/* EVENT HISTORY CARD */}
               <EventHistoryTable events={events} onRefresh={fetchEvents} />
 
-              {/* STATISTICS SECTION - Database Stats + CSV Stats */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* DATABASE STATISTICS CARD */}
-                <DatabaseStatsCard dbStats={dbStats} sensor={selectedSensor} />
-
-                {/* CSV-BASED STATISTICS TABLE CARD */}
-                <div className="">
-                  <EnhancedStatisticsTable
-                    sensorData={sensorData}
-                    selectedSensor={selectedSensor}
-                    mode={mode}
-                  />
-                </div>
-              </div>
+              {/* STATISTICS TABLE - Displays Database Statistics */}
+              <EnhancedStatisticsTable
+                dbStats={dbStats}
+                selectedSensor={selectedSensor}
+                mode={mode}
+              />
 
               {/* Fullscreen modal */}
               <FullscreenModal open={modalOpen} onClose={closeModal} title={modalTitle}>
