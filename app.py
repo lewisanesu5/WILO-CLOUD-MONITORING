@@ -119,32 +119,45 @@ def get_historical_statistics(limit=100):
         sensors = ['acceleration', 'current', 'audio']
         
         for sensor in sensors:
-            query = f"""
-                SELECT 
-                    x_min, x_max, mean, standard_deviation, skewness, kurtosis,
-                    created_at
-                FROM {sensor}
-                ORDER BY created_at ASC
-                LIMIT %s
-            """
-            cur.execute(query, (limit,))
-            rows = cur.fetchall()
-            
-            result[sensor] = [{
-                'min': row['x_min'],
-                'max': row['x_max'],
-                'mean': row['mean'],
-                'std_dev': row['standard_deviation'],
-                'skewness': row['skewness'],
-                'kurtosis': row['kurtosis'],
-                'timestamp': row['created_at'].isoformat() if row['created_at'] else None
-            } for row in rows]
+            try:
+                query = f"""
+                    SELECT 
+                        x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                        created_at
+                    FROM {sensor}
+                    ORDER BY created_at ASC
+                    LIMIT %s
+                """
+                cur.execute(query, (limit,))
+                rows = cur.fetchall()
+                
+                logger.info(f"Fetched {len(rows)} records from {sensor} table")
+                
+                result[sensor] = [{
+                    'min': row['x_min'],
+                    'max': row['x_max'],
+                    'mean': row['mean'],
+                    'std_dev': row['standard_deviation'],
+                    'skewness': row['skewness'],
+                    'kurtosis': row['kurtosis'],
+                    'timestamp': row['created_at'].isoformat() if row['created_at'] else None
+                } for row in rows]
+            except Exception as sensor_error:
+                logger.error(f"Error fetching {sensor} data: {sensor_error}")
+                result[sensor] = []
         
         conn.close()
+        
+        # Log total records fetched
+        total_records = sum(len(v) for v in result.values())
+        logger.info(f"Total records fetched: {total_records} (accel: {len(result['acceleration'])}, current: {len(result['current'])}, audio: {len(result['audio'])})")
+        
         return result
         
     except Exception as e:
-        logger.error(f"Error fetching historical statistics: {e}")
+        logger.error(f"Error fetching historical statistics (connection): {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return {'acceleration': [], 'current': [], 'audio': []}
 
 
@@ -202,12 +215,19 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         os.makedirs(fault_data_dir, exist_ok=True)
         
         # Fetch historical data from database
+        logger.info(f"Fetching historical data for fault: {fault_name}")
         historical_data = get_historical_statistics(limit=100)
         
+        # Check if we have any data
+        data_counts = {k: len(v) for k, v in historical_data.items()}
+        logger.info(f"Data counts: acceleration={data_counts['acceleration']}, current={data_counts['current']}, audio={data_counts['audio']}")
+        
         if not any(historical_data.values()):
+            error_msg = f'No historical data available in database. Records: acceleration={data_counts["acceleration"]}, current={data_counts["current"]}, audio={data_counts["audio"]}'
+            logger.warning(error_msg)
             return {
                 'success': False,
-                'error': 'No historical data available in database'
+                'error': error_msg
             }
         
         # Process each sensor/physical parameter
@@ -218,17 +238,19 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
             sensor_data = historical_data.get(sensor_name, [])
             
             if not sensor_data:
-                logger.warning(f"No data for {sensor_name}")
+                logger.warning(f"No data for {sensor_name}, skipping")
                 continue
             
             # Detect deviation point
             deviation_idx, baseline = detect_fault_deviation(sensor_data)
+            logger.info(f"{sensor_name}: deviation detected at index {deviation_idx}")
             
             # Determine extraction range (3 before + from deviation onward)
             start_idx = max(0, deviation_idx - num_intervals_before)
             end_idx = len(sensor_data)
             
             extracted_data = sensor_data[start_idx:end_idx]
+            logger.info(f"{sensor_name}: extracting {len(extracted_data)} records (indices {start_idx}-{end_idx})")
             
             # Create CSV file
             csv_filename = os.path.join(fault_data_dir, f'{fault_name}_{sensor_name}_{timestamp}_event.csv')
@@ -268,6 +290,8 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         
     except Exception as e:
         logger.error(f"Error creating fault event CSV: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return {
             'success': False,
             'error': str(e)
@@ -1299,6 +1323,75 @@ def create_event():
     except Exception as e:
         logger.error(f'Error creating event: {e}')
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/db-diagnostic', methods=['GET'])
+def db_diagnostic():
+    """
+    Diagnostic endpoint to check database connection and table structure.
+    Useful for troubleshooting database issues in production.
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Get list of all tables
+        cur.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """)
+        tables = [row[0] for row in cur.fetchall()]
+        
+        # Get record counts for sensor tables
+        record_counts = {}
+        for table in ['acceleration', 'current', 'audio']:
+            try:
+                cur.execute(f"SELECT COUNT(*) FROM {table}")
+                count = cur.fetchone()[0]
+                record_counts[table] = count
+            except Exception as e:
+                record_counts[table] = f"Error: {str(e)}"
+        
+        # Get sample data from each table
+        samples = {}
+        for table in ['acceleration', 'current', 'audio']:
+            try:
+                cur.execute(f"SELECT * FROM {table} LIMIT 1")
+                row = cur.fetchone()
+                if row:
+                    # Get column names
+                    cur.execute(f"""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = %s
+                    """, (table,))
+                    columns = [col[0] for col in cur.fetchall()]
+                    samples[table] = {
+                        'columns': columns,
+                        'sample_exists': True
+                    }
+                else:
+                    samples[table] = {'columns': [], 'sample_exists': False}
+            except Exception as e:
+                samples[table] = f"Error: {str(e)}"
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'database_tables': tables,
+            'sensor_record_counts': record_counts,
+            'table_samples': samples
+        })
+        
+    except Exception as e:
+        logger.error(f"Diagnostic error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/create-event-from-history', methods=['POST'])
