@@ -66,9 +66,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RUNNING_ON_RENDER = 'RENDER' in os.environ or '/opt/render' in BASE_DIR
 
 if RUNNING_ON_RENDER:
-    # Use persistent disk on Render - ensure it exists
+    # Use persistent disk on Render - it's mounted at /data/events by render.yaml
     PERSISTENT_DISK_PATH = '/data/events'
-    os.makedirs(PERSISTENT_DISK_PATH, exist_ok=True)
     DATA_DIR = os.path.join(PERSISTENT_DISK_PATH, 'Data')
     EVENTS_DIR = os.path.join(PERSISTENT_DISK_PATH, 'Events')
     logger.info(f"📍 Running on Render - using persistent disk at {PERSISTENT_DISK_PATH}")
@@ -81,11 +80,19 @@ else:
 UPLOAD_LOG_DIR = os.path.join(BASE_DIR, 'UploadLogs')
 
 # Ensure all directories exist
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(UPLOAD_LOG_DIR, exist_ok=True)
-os.makedirs(EVENTS_DIR, exist_ok=True)
-logger.info(f"✓ Data directory: {DATA_DIR}")
-logger.info(f"✓ Events directory: {EVENTS_DIR}")
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(EVENTS_DIR, exist_ok=True)
+    logger.info(f"✓ Data directory: {DATA_DIR}")
+    logger.info(f"✓ Events directory: {EVENTS_DIR}")
+except PermissionError as e:
+    logger.warning(f"⚠️ Permission denied creating directories: {e}")
+    logger.warning(f"⚠️ Using {DATA_DIR} and {EVENTS_DIR} (may not be writable)")
+
+try:
+    os.makedirs(UPLOAD_LOG_DIR, exist_ok=True)
+except PermissionError:
+    logger.warning(f"⚠️ Permission denied creating {UPLOAD_LOG_DIR}")
 
 event_manager = EventManager(EVENTS_DIR, DATA_DIR)
 
