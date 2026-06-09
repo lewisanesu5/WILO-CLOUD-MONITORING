@@ -675,55 +675,24 @@ function EventModal({
 
 /**
  * EnhancedStatisticsTable Component
- * Displays database statistics for selected sensor
- * - Shows latest data from PostgreSQL database
- * - Beautiful table design with category grouping
- * - Statistical parameters, frequencies, and amplitudes organized by type
- * - Professional footer with metadata
+ * Displays database statistics in a beautiful table format
+ * - All parameters fetched from PostgreSQL database
+ * - Professional table design with organized sections
+ * - Proper data alignment and formatting
  */
 function EnhancedStatisticsTable({ dbStats, selectedSensor, mode }) {
   const sensorStats = dbStats[selectedSensor];
 
   if (!sensorStats) {
     return (
-      <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600 p-8">
-        <div className="text-center py-12">
-          <div className="text-5xl mb-4">📊</div>
-          <h3 className="text-xl font-bold text-emerald-900 mb-2">Database Statistics</h3>
-          <p className="text-emerald-600">No data available for {selectedSensor} sensor</p>
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600">
+        <div className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-6 py-4 border-b-2 border-emerald-400">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">📊 Database Statistics</h3>
         </div>
+        <div className="p-8 text-center text-gray-400">No data available for {selectedSensor}</div>
       </div>
     );
   }
-
-  // Organize parameters by category
-  const statisticalParams = [
-    { key: 'mean', label: 'Mean', icon: '📈', color: 'blue' },
-    { key: 'max', label: 'Maximum', icon: '⬆️', color: 'red' },
-    { key: 'min', label: 'Minimum', icon: '⬇️', color: 'green' },
-    { key: 'std_dev', label: 'Std Deviation', icon: '📊', color: 'purple' },
-  ];
-
-  const distributionParams = [
-    { key: 'skewness', label: 'Skewness', icon: '🔄', color: 'orange' },
-    { key: 'kurtosis', label: 'Kurtosis', icon: '📐', color: 'indigo' },
-  ];
-
-  const frequencyParams = [
-    { key: 'frequency1', label: 'F1', icon: '🔊' },
-    { key: 'frequency2', label: 'F2', icon: '🔊' },
-    { key: 'frequency3', label: 'F3', icon: '🔊' },
-    { key: 'frequency4', label: 'F4', icon: '🔊' },
-    { key: 'frequency5', label: 'F5', icon: '🔊' },
-  ];
-
-  const amplitudeParams = [
-    { key: 'amplitude1', label: 'A1', icon: '📡' },
-    { key: 'amplitude2', label: 'A2', icon: '📡' },
-    { key: 'amplitude3', label: 'A3', icon: '📡' },
-    { key: 'amplitude4', label: 'A4', icon: '📡' },
-    { key: 'amplitude5', label: 'A5', icon: '📡' },
-  ];
 
   const formatValue = (value) => {
     return value !== undefined && value !== null 
@@ -731,100 +700,106 @@ function EnhancedStatisticsTable({ dbStats, selectedSensor, mode }) {
       : '—';
   };
 
-  const renderParamRow = (param, isSmall = false) => (
-    <div key={param.key} className={`flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition ${isSmall ? 'text-sm' : ''}`}>
-      <div className="flex items-center gap-2">
-        <span className="text-lg">{param.icon}</span>
-        <span className="font-medium text-gray-700">{param.label}</span>
-      </div>
-      <span className="font-bold text-gray-900 tabular-nums">{formatValue(sensorStats[param.key])}</span>
-    </div>
-  );
+  const statisticRows = [
+    { label: 'Mean', key: 'mean', icon: '📈' },
+    { label: 'Maximum', key: 'max', icon: '⬆️' },
+    { label: 'Minimum', key: 'min', icon: '⬇️' },
+    { label: 'Std Deviation', key: 'std_dev', icon: '📊' },
+    { label: 'Skewness', key: 'skewness', icon: '🔄' },
+    { label: 'Kurtosis', key: 'kurtosis', icon: '📐' },
+  ];
+
+  const frequencyRows = [
+    { label: 'Frequency 1', key: 'frequency1', icon: '🔊' },
+    { label: 'Frequency 2', key: 'frequency2', icon: '🔊' },
+    { label: 'Frequency 3', key: 'frequency3', icon: '🔊' },
+    { label: 'Frequency 4', key: 'frequency4', icon: '🔊' },
+    { label: 'Frequency 5', key: 'frequency5', icon: '🔊' },
+  ];
+
+  const amplitudeRows = [
+    { label: 'Amplitude 1', key: 'amplitude1', icon: '📡' },
+    { label: 'Amplitude 2', key: 'amplitude2', icon: '📡' },
+    { label: 'Amplitude 3', key: 'amplitude3', icon: '📡' },
+    { label: 'Amplitude 4', key: 'amplitude4', icon: '📡' },
+    { label: 'Amplitude 5', key: 'amplitude5', icon: '📡' },
+  ];
 
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600 hover:shadow-xl transition duration-200 flex flex-col h-full">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600">
       {/* HEADER */}
-      <div className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-6 py-6 border-b-2 border-emerald-400">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-2xl font-bold text-white mb-1 flex items-center gap-2">
-              📊 Database Statistics
-            </h3>
-            <p className="text-emerald-100 text-sm">
-              Sensor: <span className="font-semibold capitalize bg-emerald-700 bg-opacity-50 px-3 py-1 rounded-full">{selectedSensor.toUpperCase()}</span>
-            </p>
-          </div>
-        </div>
+      <div className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-6 py-5 border-b-2 border-emerald-400">
+        <h3 className="text-lg font-bold text-white flex items-center gap-2">📊 Database Statistics</h3>
+        <p className="text-xs text-emerald-100 mt-2">Sensor: <span className="font-semibold uppercase">{selectedSensor}</span></p>
       </div>
 
-      {/* CONTENT SECTIONS */}
-      <div className="flex-1 px-6 py-6 space-y-6 overflow-y-auto">
-        {/* Statistical Parameters Section */}
-        <div>
-          <h4 className="text-sm font-bold text-emerald-700 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <span className="text-lg">📈</span> Core Statistics
-          </h4>
-          <div className="grid grid-cols-2 gap-3">
-            {statisticalParams.map(param => renderParamRow(param))}
-          </div>
-        </div>
-
-        {/* Distribution Parameters Section */}
-        <div>
-          <h4 className="text-sm font-bold text-orange-700 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <span className="text-lg">🔄</span> Distribution Analysis
-          </h4>
-          <div className="grid grid-cols-2 gap-3">
-            {distributionParams.map(param => renderParamRow(param))}
-          </div>
-        </div>
-
-        {/* Frequencies Section */}
-        <div>
-          <h4 className="text-sm font-bold text-yellow-700 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <span className="text-lg">🔊</span> Frequency Components (Hz)
-          </h4>
-          <div className="grid grid-cols-5 gap-2">
-            {frequencyParams.map(param => (
-              <div key={param.key} className="bg-yellow-50 rounded-lg p-3 text-center hover:bg-yellow-100 transition">
-                <div className="text-lg mb-1">{param.icon}</div>
-                <div className="text-xs font-bold text-gray-700 mb-1">{param.label}</div>
-                <div className="text-sm font-bold text-yellow-900 tabular-nums">{formatValue(sensorStats[param.key])}</div>
-              </div>
+      {/* TABLE CONTENT */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          {/* CORE STATISTICS SECTION */}
+          <thead>
+            <tr className="bg-emerald-50 border-b-2 border-emerald-300">
+              <th colSpan="2" className="px-5 py-3 text-left font-bold text-emerald-900 text-base">📈 Core Statistics</th>
+            </tr>
+          </thead>
+          <tbody>
+            {statisticRows.map((row, idx) => (
+              <tr key={row.key} className={idx % 2 === 0 ? 'bg-white hover:bg-emerald-50' : 'bg-gray-50 hover:bg-emerald-50'}>
+                <td className="px-5 py-3 font-semibold text-gray-800 flex items-center gap-2 border-b border-gray-200">
+                  <span className="text-lg">{row.icon}</span>
+                  {row.label}
+                </td>
+                <td className="px-5 py-3 text-right font-bold text-gray-900 tabular-nums border-b border-gray-200">{formatValue(sensorStats[row.key])}</td>
+              </tr>
             ))}
-          </div>
-        </div>
+          </tbody>
 
-        {/* Amplitudes Section */}
-        <div>
-          <h4 className="text-sm font-bold text-blue-700 uppercase tracking-wider mb-3 flex items-center gap-2">
-            <span className="text-lg">📡</span> Amplitude Components
-          </h4>
-          <div className="grid grid-cols-5 gap-2">
-            {amplitudeParams.map(param => (
-              <div key={param.key} className="bg-blue-50 rounded-lg p-3 text-center hover:bg-blue-100 transition">
-                <div className="text-lg mb-1">{param.icon}</div>
-                <div className="text-xs font-bold text-gray-700 mb-1">{param.label}</div>
-                <div className="text-sm font-bold text-blue-900 tabular-nums">{formatValue(sensorStats[param.key])}</div>
-              </div>
+          {/* FREQUENCY COMPONENTS SECTION */}
+          <thead>
+            <tr className="bg-yellow-50 border-b-2 border-yellow-300">
+              <th colSpan="2" className="px-5 py-3 text-left font-bold text-yellow-900 text-base">🔊 Frequency Components (Hz)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {frequencyRows.map((row, idx) => (
+              <tr key={row.key} className={idx % 2 === 0 ? 'bg-white hover:bg-yellow-50' : 'bg-gray-50 hover:bg-yellow-50'}>
+                <td className="px-5 py-3 font-semibold text-gray-800 flex items-center gap-2 border-b border-gray-200">
+                  <span className="text-lg">{row.icon}</span>
+                  {row.label}
+                </td>
+                <td className="px-5 py-3 text-right font-bold text-gray-900 tabular-nums border-b border-gray-200">{formatValue(sensorStats[row.key])}</td>
+              </tr>
             ))}
-          </div>
-        </div>
+          </tbody>
+
+          {/* AMPLITUDE COMPONENTS SECTION */}
+          <thead>
+            <tr className="bg-blue-50 border-b-2 border-blue-300">
+              <th colSpan="2" className="px-5 py-3 text-left font-bold text-blue-900 text-base">📡 Amplitude Components</th>
+            </tr>
+          </thead>
+          <tbody>
+            {amplitudeRows.map((row, idx) => (
+              <tr key={row.key} className={idx % 2 === 0 ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}>
+                <td className="px-5 py-3 font-semibold text-gray-800 flex items-center gap-2 border-b border-gray-200">
+                  <span className="text-lg">{row.icon}</span>
+                  {row.label}
+                </td>
+                <td className="px-5 py-3 text-right font-bold text-gray-900 tabular-nums border-b border-gray-200">{formatValue(sensorStats[row.key])}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {/* FOOTER */}
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-t border-gray-200">
-        <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-gray-600 gap-3">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold">📅 Last Updated:</span>
-            <span className="text-gray-700 font-mono">
-              {sensorStats.timestamp ? new Date(sensorStats.timestamp).toLocaleString() : 'N/A'}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-semibold">🗄️ Source:</span>
-            <span className="px-2 py-1 bg-emerald-100 text-emerald-800 rounded-full font-semibold">PostgreSQL Database</span>
-          </div>
+      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-5 py-3 border-t border-gray-200 flex items-center justify-between text-xs text-gray-600">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold">📅 Updated:</span>
+          <span className="font-mono text-gray-700">{sensorStats.timestamp ? new Date(sensorStats.timestamp).toLocaleString() : 'N/A'}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-semibold">🗄️ PostgreSQL</span>
         </div>
       </div>
     </div>
@@ -1317,8 +1292,8 @@ function App() {
 
       {/* MAIN DASHBOARD GRID - 30/70 Layout */}
       {!loading && Object.keys(sensorData).length > 0 && (
-        <main className="max-w-full mx-auto px-4 py-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 auto-rows-min">
+        <main className="max-w-full mx-auto px-4 py-6 pb-0">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* ================================================
                 LEFT SIDEBAR (30% width) - Sensor Controls & Data
                 ================================================ */}
@@ -1440,6 +1415,66 @@ function App() {
           </div>
         </main>
       )}
+
+      {/* PAGE FOOTER - Spans Full Width */}
+      <footer className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border-t-2 border-cyan-600 mt-8 shadow-2xl">
+        <div className="max-w-full mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            {/* Column 1: System Info */}
+            <div>
+              <h4 className="text-white font-bold text-lg mb-3 flex items-center gap-2">⚡ System</h4>
+              <div className="space-y-2 text-sm text-slate-300">
+                <p><span className="font-semibold">Status:</span> <span className="text-emerald-400">🟢 Active</span></p>
+                <p><span className="font-semibold">Sensors:</span> 3 (Acceleration, Current, Audio)</p>
+                <p><span className="font-semibold">Database:</span> PostgreSQL Neon</p>
+              </div>
+            </div>
+
+            {/* Column 2: Data Source */}
+            <div>
+              <h4 className="text-white font-bold text-lg mb-3 flex items-center gap-2">🗄️ Data</h4>
+              <div className="space-y-2 text-sm text-slate-300">
+                <p><span className="font-semibold">Source:</span> PostgreSQL Database</p>
+                <p><span className="font-semibold">Sample Rate:</span> 1400 Hz (2-sec windows)</p>
+                <p><span className="font-semibold">Update:</span> Real-time</p>
+              </div>
+            </div>
+
+            {/* Column 3: Features */}
+            <div>
+              <h4 className="text-white font-bold text-lg mb-3 flex items-center gap-2">✨ Features</h4>
+              <div className="space-y-2 text-sm text-slate-300">
+                <p>📊 Statistical Analysis</p>
+                <p>📈 Time Series Visualization</p>
+                <p>🎯 FFT Frequency Analysis</p>
+                <p>📅 Event Creation & Tracking</p>
+              </div>
+            </div>
+
+            {/* Column 4: Contact */}
+            <div>
+              <h4 className="text-white font-bold text-lg mb-3 flex items-center gap-2">📞 Platform</h4>
+              <div className="space-y-2 text-sm text-slate-300">
+                <p><span className="font-semibold">Version:</span> 3.0 (Phase 3)</p>
+                <p><span className="font-semibold">Framework:</span> React + Flask</p>
+                <p><span className="font-semibold">Deployment:</span> Render + Neon</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Section */}
+          <div className="border-t border-slate-700 mt-8 pt-6 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs text-slate-400">
+            <p>© 2026 Predictive Maintenance Dashboard • All Rights Reserved</p>
+            <div className="flex items-center gap-4">
+              <a href="#" className="hover:text-cyan-400 transition">Privacy Policy</a>
+              <span>•</span>
+              <a href="#" className="hover:text-cyan-400 transition">Terms of Service</a>
+              <span>•</span>
+              <a href="#" className="hover:text-cyan-400 transition">Documentation</a>
+            </div>
+          </div>
+        </div>
+      </footer>
 
       <EventModal
         open={eventModalOpen}

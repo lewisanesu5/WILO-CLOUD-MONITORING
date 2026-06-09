@@ -1438,19 +1438,20 @@ def get_combined_dashboard_data():
                         'std_dev': row['standard_deviation'],
                         'skewness': row['skewness'],
                         'kurtosis': row['kurtosis'],
-                        'frequency1': row['frequency1'],
-                        'frequency2': row['frequency2'],
-                        'frequency3': row['frequency3'],
-                        'frequency4': row['frequency4'],
-                        'frequency5': row['frequency5'],
-                        'amplitude1': row['amplitude1'],
-                        'amplitude2': row['amplitude2'],
-                        'amplitude3': row['amplitude3'],
-                        'amplitude4': row['amplitude4'],
-                        'amplitude5': row['amplitude5'],
+                        'frequency1': row.get('frequency1'),
+                        'frequency2': row.get('frequency2'),
+                        'frequency3': row.get('frequency3'),
+                        'frequency4': row.get('frequency4'),
+                        'frequency5': row.get('frequency5'),
+                        'amplitude1': row.get('amplitude1'),
+                        'amplitude2': row.get('amplitude2'),
+                        'amplitude3': row.get('amplitude3'),
+                        'amplitude4': row.get('amplitude4'),
+                        'amplitude5': row.get('amplitude5'),
                         'timestamp': row['created_at'].isoformat() if row['created_at'] else None,
                         'source': 'database'
                     }
+                    logger.info(f"{sensor} data: freq1={row.get('frequency1')}, amp1={row.get('amplitude1')}")
                 else:
                     latest_stats[sensor] = None
                     
