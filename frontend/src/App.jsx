@@ -891,11 +891,27 @@ function App() {
         throw new Error(data.error || 'Failed to create event from historical data');
       }
 
+      // Format deviation points and intervals for display
+      const deviationInfo = data.deviation_points 
+        ? Object.entries(data.deviation_points).map(([sensor, idx]) => `${sensor}: ${idx}`).join(', ')
+        : 'N/A';
+      
+      const intervalsInfo = data.intervals_extracted
+        ? Object.entries(data.intervals_extracted).map(([sensor, count]) => `${sensor}: ${count}`).join(', ')
+        : 'N/A';
+
       // Show success with event details
       alert(`✓ Event "${faultType}" created successfully!\n\n` +
-            `Deviation detected at interval: ${data.deviation_point}\n` +
-            `Total intervals extracted: ${data.intervals_extracted}\n` +
-            `CSV files created: ${data.files_created.length}`);
+            `Deviation detected at: ${deviationInfo}\n` +
+            `Total intervals extracted: ${intervalsInfo}\n` +
+            `CSV files generated: ${data.files_created?.length || (data.csv_data ? Object.keys(data.csv_data).length : 0)}`);
+      
+      // If CSV data is in response, optionally auto-download or display
+      if (data.csv_data) {
+        console.log('CSV data available for download:', Object.keys(data.csv_data));
+        // Optional: Auto-download CSVs
+        downloadEventCSVs(faultType, data.csv_data);
+      }
       
       // Refresh events to show the new extraction
       await fetchEvents();
@@ -905,6 +921,27 @@ function App() {
       alert(`Error: ${error.message}`);
     } finally {
       setEventSubmitting(false);
+    }
+  };
+
+  // Download CSV files generated from event creation
+  const downloadEventCSVs = (faultName, csvData) => {
+    try {
+      Object.entries(csvData).forEach(([sensorName, csvContent]) => {
+        const filename = `${faultName}_${sensorName}_trend.csv`;
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      });
+      console.log('CSV files downloaded successfully');
+    } catch (error) {
+      console.error('Error downloading CSV files:', error);
     }
   };
 

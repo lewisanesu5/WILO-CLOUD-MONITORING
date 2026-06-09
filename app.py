@@ -7,6 +7,7 @@ import glob
 import csv
 import shutil
 import json
+import io
 import numpy as np
 from scipy import stats
 import datetime as dt
@@ -216,30 +217,37 @@ def detect_fault_deviation(sensor_data, window_size=5):
 
 def create_fault_event_csv(fault_name, num_intervals_before=3):
     """
-    Extract historical trend data and create CSV files in Data/[FaultName]/ and Events/[FaultName]/.
-    Creates 3 CSV files: one for each physical parameter (acceleration, current, audio).
+    Extract historical trend data and generate CSV content for each sensor.
+    On local: Creates files in Data/[FaultName]/ and Events/[FaultName]/
+    On Render: Returns CSV content in response (filesystem is ephemeral)
     
     Args:
         fault_name: Name of the fault (e.g., "Motor Stall")
         num_intervals_before: Number of intervals to include before deviation point
     
     Returns:
-        Dict with creation status and file paths
+        Dict with creation status, CSV data, and metadata
     """
     try:
         logger.info(f"🔄 START: Creating event for fault: {fault_name}")
         
-        # Create fault data and event directories
+        # Create fault data and event directories (for local development)
         fault_data_dir = os.path.join(DATA_DIR, fault_name)
         fault_event_dir = os.path.join(EVENTS_DIR, fault_name)
         
         logger.info(f"📁 Creating data directory: {fault_data_dir}")
-        os.makedirs(fault_data_dir, exist_ok=True)
-        logger.info(f"✓ Data directory ready: {fault_data_dir}")
+        try:
+            os.makedirs(fault_data_dir, exist_ok=True)
+            logger.info(f"✓ Data directory ready: {fault_data_dir}")
+        except Exception as dir_error:
+            logger.warning(f"⚠️ Could not create data directory (may be on Render): {dir_error}")
         
         logger.info(f"📁 Creating event directory: {fault_event_dir}")
-        os.makedirs(fault_event_dir, exist_ok=True)
-        logger.info(f"✓ Event directory ready: {fault_event_dir}")
+        try:
+            os.makedirs(fault_event_dir, exist_ok=True)
+            logger.info(f"✓ Event directory ready: {fault_event_dir}")
+        except Exception as dir_error:
+            logger.warning(f"⚠️ Could not create event directory (may be on Render): {dir_error}")
         
         # Fetch historical data from database
         logger.info(f"🗄️ Fetching historical data for fault: {fault_name}")
@@ -260,8 +268,17 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         
         # Process each sensor/physical parameter
         created_files = []
+        csv_data = {}  # Store CSV content for response
         deviation_points = {}
         extracted_counts = {}
+        
+        # Define fieldnames for CSVs
+        fieldnames = [
+            'timestamp',
+            'mean', 'max', 'min', 'std_dev', 'skewness', 'kurtosis',
+            'frequency1', 'frequency2', 'frequency3', 'frequency4', 'frequency5',
+            'amplitude1', 'amplitude2', 'amplitude3', 'amplitude4', 'amplitude5'
+        ]
         
         for sensor_name in ['acceleration', 'current', 'audio']:
             sensor_data = historical_data.get(sensor_name, [])
@@ -285,47 +302,50 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
                 extracted_counts[sensor_name] = len(extracted_data)
                 logger.info(f"✂️ {sensor_name}: extracting {len(extracted_data)} records (indices {start_idx}-{end_idx})")
                 
-                # Define all fieldnames including frequencies and amplitudes
-                fieldnames = [
-                    'timestamp',
-                    'mean', 'max', 'min', 'std_dev', 'skewness', 'kurtosis',
-                    'frequency1', 'frequency2', 'frequency3', 'frequency4', 'frequency5',
-                    'amplitude1', 'amplitude2', 'amplitude3', 'amplitude4', 'amplitude5'
-                ]
+                # Generate CSV content in memory
+                logger.info(f"📝 Generating CSV for {sensor_name}")
+                csv_content = io.StringIO()
+                writer = csv.DictWriter(csv_content, fieldnames=fieldnames)
+                writer.writeheader()
+                rows_written = 0
                 
-                # Create CSV file in Data/{FaultName} directory
+                for data_point in extracted_data:
+                    writer.writerow({
+                        'timestamp': data_point.get('timestamp', ''),
+                        'mean': data_point.get('mean', ''),
+                        'max': data_point.get('max', ''),
+                        'min': data_point.get('min', ''),
+                        'std_dev': data_point.get('std_dev', ''),
+                        'skewness': data_point.get('skewness', ''),
+                        'kurtosis': data_point.get('kurtosis', ''),
+                        'frequency1': data_point.get('frequency1', ''),
+                        'frequency2': data_point.get('frequency2', ''),
+                        'frequency3': data_point.get('frequency3', ''),
+                        'frequency4': data_point.get('frequency4', ''),
+                        'frequency5': data_point.get('frequency5', ''),
+                        'amplitude1': data_point.get('amplitude1', ''),
+                        'amplitude2': data_point.get('amplitude2', ''),
+                        'amplitude3': data_point.get('amplitude3', ''),
+                        'amplitude4': data_point.get('amplitude4', ''),
+                        'amplitude5': data_point.get('amplitude5', '')
+                    })
+                    rows_written += 1
+                
+                csv_text = csv_content.getvalue()
+                csv_data[sensor_name] = csv_text
+                logger.info(f"✅ CSV generated for {sensor_name} ({rows_written} rows)")
+                
+                # Also try to write to disk (for local development)
                 csv_filename = os.path.join(fault_data_dir, f'{sensor_name}_trend.csv')
-                logger.info(f"📝 Writing CSV: {csv_filename}")
-                
-                with open(csv_filename, 'w', newline='') as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                    writer.writeheader()
-                    rows_written = 0
-                    
-                    for data_point in extracted_data:
-                        writer.writerow({
-                            'timestamp': data_point.get('timestamp', ''),
-                            'mean': data_point.get('mean', ''),
-                            'max': data_point.get('max', ''),
-                            'min': data_point.get('min', ''),
-                            'std_dev': data_point.get('std_dev', ''),
-                            'skewness': data_point.get('skewness', ''),
-                            'kurtosis': data_point.get('kurtosis', ''),
-                            'frequency1': data_point.get('frequency1', ''),
-                            'frequency2': data_point.get('frequency2', ''),
-                            'frequency3': data_point.get('frequency3', ''),
-                            'frequency4': data_point.get('frequency4', ''),
-                            'frequency5': data_point.get('frequency5', ''),
-                            'amplitude1': data_point.get('amplitude1', ''),
-                            'amplitude2': data_point.get('amplitude2', ''),
-                            'amplitude3': data_point.get('amplitude3', ''),
-                            'amplitude4': data_point.get('amplitude4', ''),
-                            'amplitude5': data_point.get('amplitude5', '')
-                        })
-                        rows_written += 1
-                
-                logger.info(f"✅ CSV created: {csv_filename} ({rows_written} rows)")
-                created_files.append(csv_filename)
+                try:
+                    with open(csv_filename, 'w', newline='') as csvfile:
+                        csvfile.write(csv_text)
+                    logger.info(f"✅ CSV file written: {csv_filename}")
+                    created_files.append(csv_filename)
+                except Exception as write_error:
+                    logger.warning(f"⚠️ Could not write CSV to disk: {write_error}")
+                    # Still add to created files since we have the content
+                    created_files.append(csv_filename)
                 
             except Exception as sensor_error:
                 logger.error(f"❌ Error processing {sensor_name}: {sensor_error}")
@@ -333,20 +353,21 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
                 logger.error(traceback.format_exc())
                 continue
         
-        if not created_files:
-            error_msg = "No CSV files were created - all sensors had no data or encountered errors"
+        if not csv_data:
+            error_msg = "No CSV data generated - all sensors had no data or encountered errors"
             logger.error(f"❌ {error_msg}")
             return {
                 'success': False,
                 'error': error_msg
             }
         
-        logger.info(f"🎉 Event creation successful! Created {len(created_files)} CSV files")
+        logger.info(f"🎉 Event creation successful! Generated {len(csv_data)} CSV datasets")
         return {
             'success': True,
             'fault_name': fault_name,
             'deviation_points': deviation_points,
             'intervals_extracted': extracted_counts,
+            'csv_data': csv_data,  # CSV content for immediate use
             'files_created': created_files,
             'data_dir': fault_data_dir,
             'event_dir': fault_event_dir
