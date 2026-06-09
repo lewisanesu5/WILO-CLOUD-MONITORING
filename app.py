@@ -111,6 +111,7 @@ def get_historical_statistics(limit=100):
             'audio': [...]
         }
     """
+    conn = None
     try:
         conn = get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -131,7 +132,7 @@ def get_historical_statistics(limit=100):
                 cur.execute(query, (limit,))
                 rows = cur.fetchall()
                 
-                logger.info(f"Fetched {len(rows)} records from {sensor} table")
+                logger.info(f"✓ Fetched {len(rows)} records from {sensor} table")
                 
                 result[sensor] = [{
                     'min': row['x_min'],
@@ -143,22 +144,26 @@ def get_historical_statistics(limit=100):
                     'timestamp': row['created_at'].isoformat() if row['created_at'] else None
                 } for row in rows]
             except Exception as sensor_error:
-                logger.error(f"Error fetching {sensor} data: {sensor_error}")
+                logger.error(f"✗ Error fetching {sensor} data: {sensor_error}")
                 result[sensor] = []
-        
-        conn.close()
         
         # Log total records fetched
         total_records = sum(len(v) for v in result.values())
-        logger.info(f"Total records fetched: {total_records} (accel: {len(result['acceleration'])}, current: {len(result['current'])}, audio: {len(result['audio'])})")
+        logger.info(f"📊 Total records fetched: {total_records} (accel: {len(result['acceleration'])}, current: {len(result['current'])}, audio: {len(result['audio'])})")
         
         return result
         
     except Exception as e:
-        logger.error(f"Error fetching historical statistics (connection): {e}")
+        logger.error(f"✗ Error fetching historical statistics (connection): {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return {'acceleration': [], 'current': [], 'audio': []}
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception as close_err:
+                logger.warning(f"Warning closing connection: {close_err}")
 
 
 def detect_fault_deviation(sensor_data, window_size=5):
@@ -1474,16 +1479,28 @@ def create_event_from_history():
         if not fault_name:
             return jsonify({'error': 'fault_name is required'}), 400
         
+        logger.info(f"🔄 Creating event for fault: {fault_name}")
         result = create_fault_event_csv(fault_name)
+        logger.info(f"📝 Event creation result: {result}")
         
         if result['success']:
             return jsonify(result), 201
         else:
-            return jsonify(result), 400
+            error_msg = result.get('error', 'Unknown error creating event')
+            logger.error(f"❌ Event creation failed: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
             
     except Exception as e:
-        logger.error(f'Error creating event from history: {e}')
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"❌ Exception in create_event_from_history: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': f'Server error: {str(e)}'
+        }), 500
 
 
 @app.route('/available-faults', methods=['GET'])
