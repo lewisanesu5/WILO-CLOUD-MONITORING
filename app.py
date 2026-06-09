@@ -1061,6 +1061,42 @@ def get_files():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/storage-info')
+def storage_info():
+    """Show storage configuration and list all created event CSV files."""
+    try:
+        event_files = []
+        
+        # List all event CSVs recursively from Data directory
+        for filepath in glob.glob(os.path.join(DATA_DIR, '**/*.csv'), recursive=True):
+            try:
+                stat = os.stat(filepath)
+                rel_path = os.path.relpath(filepath, DATA_DIR)
+                event_files.append({
+                    'path': rel_path,
+                    'full_path': filepath,
+                    'size': stat.st_size,
+                    'modified': dt.datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+            except Exception as e:
+                logger.warning(f"Could not stat file {filepath}: {e}")
+        
+        return jsonify({
+            'storage_config': {
+                'is_render': RUNNING_ON_RENDER,
+                'data_directory': DATA_DIR,
+                'events_directory': EVENTS_DIR,
+                'data_dir_exists': os.path.exists(DATA_DIR),
+                'events_dir_exists': os.path.exists(EVENTS_DIR),
+                'persistent_storage': '/data/events' in DATA_DIR if RUNNING_ON_RENDER else 'local'
+            },
+            'event_csv_files': event_files,
+            'total_files': len(event_files)
+        })
+    except Exception as e:
+        logger.error(f"Storage info error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/upload', methods=['POST'])
 def upload_files():
     """
