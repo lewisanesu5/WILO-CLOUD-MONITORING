@@ -124,6 +124,8 @@ def get_historical_statistics(limit=100):
                 query = f"""
                     SELECT 
                         x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                        frequency1, frequency2, frequency3, frequency4, frequency5,
+                        amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
                         created_at
                     FROM {sensor}
                     ORDER BY created_at ASC
@@ -141,6 +143,16 @@ def get_historical_statistics(limit=100):
                     'std_dev': row['standard_deviation'],
                     'skewness': row['skewness'],
                     'kurtosis': row['kurtosis'],
+                    'frequency1': row.get('frequency1'),
+                    'frequency2': row.get('frequency2'),
+                    'frequency3': row.get('frequency3'),
+                    'frequency4': row.get('frequency4'),
+                    'frequency5': row.get('frequency5'),
+                    'amplitude1': row.get('amplitude1'),
+                    'amplitude2': row.get('amplitude2'),
+                    'amplitude3': row.get('amplitude3'),
+                    'amplitude4': row.get('amplitude4'),
+                    'amplitude5': row.get('amplitude5'),
                     'timestamp': row['created_at'].isoformat() if row['created_at'] else None
                 } for row in rows]
             except Exception as sensor_error:
@@ -204,7 +216,7 @@ def detect_fault_deviation(sensor_data, window_size=5):
 
 def create_fault_event_csv(fault_name, num_intervals_before=3):
     """
-    Extract historical trend data and create CSV files in Data/[FaultName]/.
+    Extract historical trend data and create CSV files in Data/[FaultName]/ and Events/[FaultName]/.
     Creates 3 CSV files: one for each physical parameter (acceleration, current, audio).
     
     Args:
@@ -215,9 +227,13 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         Dict with creation status and file paths
     """
     try:
-        # Create fault data directory
+        # Create fault data and event directories
         fault_data_dir = os.path.join(DATA_DIR, fault_name)
+        fault_event_dir = os.path.join(EVENTS_DIR, fault_name)
         os.makedirs(fault_data_dir, exist_ok=True)
+        os.makedirs(fault_event_dir, exist_ok=True)
+        
+        logger.info(f"✓ Created directories: {fault_data_dir} and {fault_event_dir}")
         
         # Fetch historical data from database
         logger.info(f"Fetching historical data for fault: {fault_name}")
@@ -237,7 +253,6 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         
         # Process each sensor/physical parameter
         created_files = []
-        timestamp = dt.datetime.now().strftime('%Y%m%d_%H%M%S')
         
         for sensor_name in ['acceleration', 'current', 'audio']:
             sensor_data = historical_data.get(sensor_name, [])
@@ -257,32 +272,43 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
             extracted_data = sensor_data[start_idx:end_idx]
             logger.info(f"{sensor_name}: extracting {len(extracted_data)} records (indices {start_idx}-{end_idx})")
             
-            # Create CSV file
-            csv_filename = os.path.join(fault_data_dir, f'{fault_name}_{sensor_name}_{timestamp}_event.csv')
-            
+            # Define all fieldnames including frequencies and amplitudes
             fieldnames = [
-                'interval', 'timestamp',
-                'mean', 'max', 'min', 'std_dev', 'skewness', 'kurtosis'
+                'timestamp',
+                'mean', 'max', 'min', 'std_dev', 'skewness', 'kurtosis',
+                'frequency1', 'frequency2', 'frequency3', 'frequency4', 'frequency5',
+                'amplitude1', 'amplitude2', 'amplitude3', 'amplitude4', 'amplitude5'
             ]
+            
+            # Create CSV file in Data/{FaultName} directory
+            csv_filename = os.path.join(fault_data_dir, f'{sensor_name}_trend.csv')
             
             with open(csv_filename, 'w', newline='') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 
-                for idx, data_point in enumerate(extracted_data):
-                    interval_num = start_idx + idx + 1  # Interval numbering
+                for data_point in extracted_data:
                     writer.writerow({
-                        'interval': interval_num,
                         'timestamp': data_point.get('timestamp', ''),
                         'mean': data_point.get('mean', ''),
                         'max': data_point.get('max', ''),
                         'min': data_point.get('min', ''),
                         'std_dev': data_point.get('std_dev', ''),
                         'skewness': data_point.get('skewness', ''),
-                        'kurtosis': data_point.get('kurtosis', '')
+                        'kurtosis': data_point.get('kurtosis', ''),
+                        'frequency1': data_point.get('frequency1', ''),
+                        'frequency2': data_point.get('frequency2', ''),
+                        'frequency3': data_point.get('frequency3', ''),
+                        'frequency4': data_point.get('frequency4', ''),
+                        'frequency5': data_point.get('frequency5', ''),
+                        'amplitude1': data_point.get('amplitude1', ''),
+                        'amplitude2': data_point.get('amplitude2', ''),
+                        'amplitude3': data_point.get('amplitude3', ''),
+                        'amplitude4': data_point.get('amplitude4', ''),
+                        'amplitude5': data_point.get('amplitude5', '')
                     })
             
-            logger.info(f"✓ Created event CSV: {csv_filename}")
+            logger.info(f"✓ Created trend CSV: {csv_filename}")
             created_files.append(csv_filename)
         
         return {
@@ -290,7 +316,9 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
             'fault_name': fault_name,
             'deviation_point': deviation_idx,
             'intervals_extracted': len(extracted_data),
-            'files_created': created_files
+            'files_created': created_files,
+            'data_dir': fault_data_dir,
+            'event_dir': fault_event_dir
         }
         
     except Exception as e:
