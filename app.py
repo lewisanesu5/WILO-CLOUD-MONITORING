@@ -61,12 +61,29 @@ except Exception as e:
 
 # Configure directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'Data')
+
+# Detect if running on Render (persistent disk at /data/events)
+RUNNING_ON_RENDER = os.path.exists('/data/events') or os.environ.get('RENDER') == 'true'
+
+if RUNNING_ON_RENDER:
+    # Use persistent disk on Render
+    DATA_DIR = '/data/events/Data'
+    EVENTS_DIR = '/data/events/Events'
+    logger.info("📍 Running on Render - using persistent disk at /data/events")
+else:
+    # Use local directories
+    DATA_DIR = os.path.join(BASE_DIR, 'Data')
+    EVENTS_DIR = os.path.join(BASE_DIR, 'Events')
+    logger.info("📍 Running locally - using project directories")
+
 UPLOAD_LOG_DIR = os.path.join(BASE_DIR, 'UploadLogs')
-EVENTS_DIR = os.path.join(BASE_DIR, 'Events')
+
+# Ensure all directories exist
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_LOG_DIR, exist_ok=True)
 os.makedirs(EVENTS_DIR, exist_ok=True)
+logger.info(f"✓ Data directory: {DATA_DIR}")
+logger.info(f"✓ Events directory: {EVENTS_DIR}")
 
 event_manager = EventManager(EVENTS_DIR, DATA_DIR)
 

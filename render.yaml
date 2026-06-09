@@ -7,6 +7,10 @@ services:
     buildCommand: |
       cd frontend && npm install && npm run build && cd .. && pip install -r requirements.txt
     startCommand: gunicorn app:app
+    disk:
+      - name: event_data
+        mountPath: /data/events
+        sizeGB: 2
     envVars:
       - key: FLASK_ENV
         value: production
