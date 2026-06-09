@@ -777,6 +777,69 @@ function EnhancedStatisticsTable({ sensorData, selectedSensor, mode }) {
 
 
 /**
+ * DatabaseStatsCard Component
+ * Displays latest statistics fetched from PostgreSQL database
+ */
+function DatabaseStatsCard({ dbStats, sensor }) {
+  const stats = dbStats[sensor];
+
+  if (!stats) {
+    return (
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-blue-600 p-6 h-full flex items-center justify-center">
+        <p className="text-gray-400 text-center">No database statistics available for {sensor}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-blue-600 hover:shadow-xl transition duration-200">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 px-6 py-4 border-b-2 border-blue-400">
+        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+          🗄️ Database Statistics
+        </h3>
+        <p className="text-xs text-blue-100 mt-1">
+          Latest from PostgreSQL • {stats.timestamp ? new Date(stats.timestamp).toLocaleString() : 'N/A'}
+        </p>
+      </div>
+
+      {/* Content */}
+      <div className="p-5">
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-3 rounded-lg border border-blue-200">
+            <p className="text-blue-600 font-semibold text-xs">Mean</p>
+            <p className="text-xl font-bold text-blue-900">{stats.mean?.toFixed(4) || '—'}</p>
+          </div>
+          <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-3 rounded-lg border border-green-200">
+            <p className="text-green-600 font-semibold text-xs">Std Dev</p>
+            <p className="text-xl font-bold text-green-900">{stats.std_dev?.toFixed(4) || '—'}</p>
+          </div>
+          <div className="bg-gradient-to-br from-purple-50 to-pink-50 p-3 rounded-lg border border-purple-200">
+            <p className="text-purple-600 font-semibold text-xs">Min</p>
+            <p className="text-lg font-bold text-purple-900">{stats.min?.toFixed(4) || '—'}</p>
+          </div>
+          <div className="bg-gradient-to-br from-orange-50 to-red-50 p-3 rounded-lg border border-orange-200">
+            <p className="text-orange-600 font-semibold text-xs">Max</p>
+            <p className="text-lg font-bold text-orange-900">{stats.max?.toFixed(4) || '—'}</p>
+          </div>
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-3 rounded-lg border border-indigo-200">
+            <p className="text-indigo-600 font-semibold text-xs">Skewness</p>
+            <p className="text-lg font-bold text-indigo-900">{stats.skewness?.toFixed(4) || '—'}</p>
+          </div>
+          <div className="bg-gradient-to-br from-pink-50 to-rose-50 p-3 rounded-lg border border-pink-200">
+            <p className="text-pink-600 font-semibold text-xs">Kurtosis</p>
+            <p className="text-lg font-bold text-pink-900">{stats.kurtosis?.toFixed(4) || '—'}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+
+/**
  * Main Application Component
  * Professional Industrial Monitoring Dashboard
  * 
@@ -798,6 +861,8 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [fileHistory, setFileHistory] = useState([]);
   const [historicalStats, setHistoricalStats] = useState([]);
+  const [dbStats, setDbStats] = useState({});  // New: Database statistics
+  const [recentFiles, setRecentFiles] = useState([]);  // New: Recent CSV files from database query
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
   const [modalContent, setModalContent] = useState(null);
@@ -885,32 +950,11 @@ function App() {
   const fetchSensorData = async (selectedMode = 'max') => {
     try {
       setLoading(true);
-      // Use database stats endpoint which fetches latest data directly from PostgreSQL
-      const response = await fetch(`${API_BASE_URL}/api/database-stats`);
+      const response = await fetch(`${API_BASE_URL}/api/sensor-data?mode=${selectedMode}`);
       if (!response.ok) throw new Error('Failed to fetch sensor data');
       
       const result = await response.json();
-      
-      // Transform database stats into the format expected by the dashboard
-      const transformedData = {};
-      if (result.data) {
-        Object.entries(result.data).forEach(([sensor, data]) => {
-          if (data) {
-            transformedData[sensor] = {
-              stats: data.stats,
-              frequencies: data.frequencies,
-              amplitudes: data.amplitudes,
-              health: data.health,
-              data_points: data.data_points,
-              raw_timestamps: [],
-              raw_values: [],
-              file_timestamp: data.timestamp
-            };
-          }
-        });
-      }
-      
-      setSensorData(transformedData);
+      setSensorData(result.data || {});
       setLastUpdate(new Date().toLocaleTimeString());
       setError(null);
     } catch (err) {
@@ -918,6 +962,23 @@ function App() {
       console.error('Error fetching data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // NEW: Fetch database statistics and recent files
+  const fetchDatabaseStats = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/combined-dashboard-data`);
+      if (!response.ok) throw new Error('Failed to fetch database stats');
+      
+      const result = await response.json();
+      if (result.success) {
+        setDbStats(result.database_stats || {});
+        setRecentFiles(result.recent_files || []);
+        console.log('✓ Database stats fetched:', result.database_stats);
+      }
+    } catch (err) {
+      console.warn('Could not fetch database stats:', err);
     }
   };
 
@@ -988,6 +1049,14 @@ function App() {
 
   useEffect(() => {
     fetchEvents();
+  }, []);
+
+  // NEW: Fetch database statistics on mount
+  useEffect(() => {
+    fetchDatabaseStats();
+    // Refresh database stats every 2 hours (same as sensor data)
+    const interval = setInterval(fetchDatabaseStats, 2 * 60 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -1283,13 +1352,19 @@ function App() {
               {/* EVENT HISTORY CARD */}
               <EventHistoryTable events={events} onRefresh={fetchEvents} />
 
-              {/* STATISTICS TABLE CARD */}
-              <div className="">
-                <EnhancedStatisticsTable
-                  sensorData={sensorData}
-                  selectedSensor={selectedSensor}
-                  mode={mode}
-                />
+              {/* STATISTICS SECTION - Database Stats + CSV Stats */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* DATABASE STATISTICS CARD */}
+                <DatabaseStatsCard dbStats={dbStats} sensor={selectedSensor} />
+
+                {/* CSV-BASED STATISTICS TABLE CARD */}
+                <div className="">
+                  <EnhancedStatisticsTable
+                    sensorData={sensorData}
+                    selectedSensor={selectedSensor}
+                    mode={mode}
+                  />
+                </div>
               </div>
 
               {/* Fullscreen modal */}

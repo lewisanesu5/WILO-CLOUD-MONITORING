@@ -919,87 +919,7 @@ def get_sensor_data():
         })
     except Exception as e:
         logger.error(f"API error: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@app.route('/api/database-stats', methods=['GET'])
-def get_database_stats():
-    """
-    Get latest statistics directly from database (no CSV file dependency).
-    This is for the dashboard to display recent data from PostgreSQL.
-    """
-    api_start = time.time()
-    try:
-        logger.info("📊 Fetching latest database statistics for dashboard")
-        
-        conn = get_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        result = {}
-        sensors = ['acceleration', 'current', 'audio']
-        
-        for sensor in sensors:
-            try:
-                query = f"""
-                    SELECT 
-                        x_min, x_max, mean, standard_deviation, skewness, kurtosis,
-                        range, frequency1, frequency2, frequency3, frequency4, frequency5,
-                        amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
-                        created_at
-                    FROM {sensor}
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """
-                cur.execute(query)
-                row = cur.fetchone()
-                
-                if row:
-                    result[sensor] = {
-                        'stats': {
-                            'min': row['x_min'],
-                            'max': row['x_max'],
-                            'mean': row['mean'],
-                            'std_dev': row['standard_deviation'],
-                            'range': row.get('range', 0),
-                            'skewness': row['skewness'],
-                            'kurtosis': row['kurtosis']
-                        },
-                        'frequencies': [row[f'frequency{i}'] for i in range(1, 6)],
-                        'amplitudes': [row[f'amplitude{i}'] for i in range(1, 6)],
-                        'health': 'normal',
-                        'data_points': 1,
-                        'timestamp': row['created_at'].isoformat() if row['created_at'] else None
-                    }
-                    logger.info(f"✓ {sensor}: latest stats from {row['created_at']}")
-                else:
-                    result[sensor] = None
-                    logger.warning(f"✗ No data found for {sensor}")
-                    
-            except Exception as sensor_error:
-                logger.error(f"✗ Error fetching {sensor}: {sensor_error}")
-                result[sensor] = None
-        
-        conn.close()
-        
-        api_time = time.time() - api_start
-        
-        return jsonify({
-            'status': 'success',
-            'data': result,
-            'timestamp': dt.datetime.now().isoformat(),
-            'response_time_ms': round(api_time * 1000, 2)
-        })
-        
-    except Exception as e:
-        logger.error(f"✗ Error fetching database stats: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
 
 @app.route('/api/sensor/<sensor_name>')
 def get_sensor_detail(sensor_name):
@@ -1473,6 +1393,98 @@ def db_diagnostic():
         
     except Exception as e:
         logger.error(f"Diagnostic error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/combined-dashboard-data', methods=['GET'])
+def get_combined_dashboard_data():
+    """
+    Combined endpoint returning:
+    - Latest statistics from database (acceleration, current, audio)
+    - Recent CSV files from Data/ directory
+    - Ready for dashboard display
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # 1. Fetch latest statistics from each sensor table
+        latest_stats = {}
+        sensors = ['acceleration', 'current', 'audio']
+        
+        for sensor in sensors:
+            try:
+                query = f"""
+                    SELECT 
+                        x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                        frequency1, frequency2, frequency3, frequency4, frequency5,
+                        amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
+                        created_at
+                    FROM {sensor}
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """
+                cur.execute(query)
+                row = cur.fetchone()
+                
+                if row:
+                    latest_stats[sensor] = {
+                        'min': row['x_min'],
+                        'max': row['x_max'],
+                        'mean': row['mean'],
+                        'std_dev': row['standard_deviation'],
+                        'skewness': row['skewness'],
+                        'kurtosis': row['kurtosis'],
+                        'frequencies': [row[f'frequency{i}'] for i in range(1, 6)],
+                        'amplitudes': [row[f'amplitude{i}'] for i in range(1, 6)],
+                        'timestamp': row['created_at'].isoformat() if row['created_at'] else None,
+                        'source': 'database'
+                    }
+                else:
+                    latest_stats[sensor] = None
+                    
+            except Exception as sensor_error:
+                logger.error(f"Error fetching {sensor}: {sensor_error}")
+                latest_stats[sensor] = None
+        
+        conn.close()
+        
+        # 2. Get recent CSV files from Data/ directory
+        csv_files = []
+        try:
+            for sensor in ['acceleration', 'current', 'audio']:
+                max_file = os.path.join(DATA_DIR, f'max_{sensor}.csv')
+                min_file = os.path.join(DATA_DIR, f'min_{sensor}.csv')
+                
+                for file_path in [max_file, min_file]:
+                    if os.path.exists(file_path):
+                        stat = os.stat(file_path)
+                        csv_files.append({
+                            'name': os.path.basename(file_path),
+                            'sensor': sensor,
+                            'size': stat.st_size,
+                            'modified': dt.datetime.fromtimestamp(stat.st_mtime).isoformat()
+                        })
+        except Exception as e:
+            logger.error(f"Error reading CSV files: {e}")
+        
+        # Sort by modified date
+        csv_files.sort(key=lambda x: x['modified'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'database_stats': latest_stats,
+            'recent_files': csv_files[:10],  # Last 10 files
+            'timestamp': dt.datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in combined dashboard data: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
