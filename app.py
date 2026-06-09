@@ -227,25 +227,32 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         Dict with creation status and file paths
     """
     try:
+        logger.info(f"🔄 START: Creating event for fault: {fault_name}")
+        
         # Create fault data and event directories
         fault_data_dir = os.path.join(DATA_DIR, fault_name)
         fault_event_dir = os.path.join(EVENTS_DIR, fault_name)
-        os.makedirs(fault_data_dir, exist_ok=True)
-        os.makedirs(fault_event_dir, exist_ok=True)
         
-        logger.info(f"✓ Created directories: {fault_data_dir} and {fault_event_dir}")
+        logger.info(f"📁 Creating data directory: {fault_data_dir}")
+        os.makedirs(fault_data_dir, exist_ok=True)
+        logger.info(f"✓ Data directory ready: {fault_data_dir}")
+        
+        logger.info(f"📁 Creating event directory: {fault_event_dir}")
+        os.makedirs(fault_event_dir, exist_ok=True)
+        logger.info(f"✓ Event directory ready: {fault_event_dir}")
         
         # Fetch historical data from database
-        logger.info(f"Fetching historical data for fault: {fault_name}")
+        logger.info(f"🗄️ Fetching historical data for fault: {fault_name}")
         historical_data = get_historical_statistics(limit=100)
+        logger.info(f"📊 Historical data fetched")
         
         # Check if we have any data
         data_counts = {k: len(v) for k, v in historical_data.items()}
-        logger.info(f"Data counts: acceleration={data_counts['acceleration']}, current={data_counts['current']}, audio={data_counts['audio']}")
+        logger.info(f"📈 Data counts - acceleration: {data_counts['acceleration']}, current: {data_counts['current']}, audio: {data_counts['audio']}")
         
         if not any(historical_data.values()):
             error_msg = f'No historical data available in database. Records: acceleration={data_counts["acceleration"]}, current={data_counts["current"]}, audio={data_counts["audio"]}'
-            logger.warning(error_msg)
+            logger.warning(f"⚠️ {error_msg}")
             return {
                 'success': False,
                 'error': error_msg
@@ -253,76 +260,100 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         
         # Process each sensor/physical parameter
         created_files = []
+        deviation_points = {}
+        extracted_counts = {}
         
         for sensor_name in ['acceleration', 'current', 'audio']:
             sensor_data = historical_data.get(sensor_name, [])
+            logger.info(f"🔍 Processing {sensor_name}: {len(sensor_data)} records available")
             
             if not sensor_data:
-                logger.warning(f"No data for {sensor_name}, skipping")
+                logger.warning(f"⚠️ No data for {sensor_name}, skipping")
                 continue
             
-            # Detect deviation point
-            deviation_idx, baseline = detect_fault_deviation(sensor_data)
-            logger.info(f"{sensor_name}: deviation detected at index {deviation_idx}")
-            
-            # Determine extraction range (3 before + from deviation onward)
-            start_idx = max(0, deviation_idx - num_intervals_before)
-            end_idx = len(sensor_data)
-            
-            extracted_data = sensor_data[start_idx:end_idx]
-            logger.info(f"{sensor_name}: extracting {len(extracted_data)} records (indices {start_idx}-{end_idx})")
-            
-            # Define all fieldnames including frequencies and amplitudes
-            fieldnames = [
-                'timestamp',
-                'mean', 'max', 'min', 'std_dev', 'skewness', 'kurtosis',
-                'frequency1', 'frequency2', 'frequency3', 'frequency4', 'frequency5',
-                'amplitude1', 'amplitude2', 'amplitude3', 'amplitude4', 'amplitude5'
-            ]
-            
-            # Create CSV file in Data/{FaultName} directory
-            csv_filename = os.path.join(fault_data_dir, f'{sensor_name}_trend.csv')
-            
-            with open(csv_filename, 'w', newline='') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
+            try:
+                # Detect deviation point
+                deviation_idx, baseline = detect_fault_deviation(sensor_data)
+                deviation_points[sensor_name] = deviation_idx
+                logger.info(f"📍 {sensor_name}: deviation detected at index {deviation_idx}")
                 
-                for data_point in extracted_data:
-                    writer.writerow({
-                        'timestamp': data_point.get('timestamp', ''),
-                        'mean': data_point.get('mean', ''),
-                        'max': data_point.get('max', ''),
-                        'min': data_point.get('min', ''),
-                        'std_dev': data_point.get('std_dev', ''),
-                        'skewness': data_point.get('skewness', ''),
-                        'kurtosis': data_point.get('kurtosis', ''),
-                        'frequency1': data_point.get('frequency1', ''),
-                        'frequency2': data_point.get('frequency2', ''),
-                        'frequency3': data_point.get('frequency3', ''),
-                        'frequency4': data_point.get('frequency4', ''),
-                        'frequency5': data_point.get('frequency5', ''),
-                        'amplitude1': data_point.get('amplitude1', ''),
-                        'amplitude2': data_point.get('amplitude2', ''),
-                        'amplitude3': data_point.get('amplitude3', ''),
-                        'amplitude4': data_point.get('amplitude4', ''),
-                        'amplitude5': data_point.get('amplitude5', '')
-                    })
-            
-            logger.info(f"✓ Created trend CSV: {csv_filename}")
-            created_files.append(csv_filename)
+                # Determine extraction range (3 before + from deviation onward)
+                start_idx = max(0, deviation_idx - num_intervals_before)
+                end_idx = len(sensor_data)
+                
+                extracted_data = sensor_data[start_idx:end_idx]
+                extracted_counts[sensor_name] = len(extracted_data)
+                logger.info(f"✂️ {sensor_name}: extracting {len(extracted_data)} records (indices {start_idx}-{end_idx})")
+                
+                # Define all fieldnames including frequencies and amplitudes
+                fieldnames = [
+                    'timestamp',
+                    'mean', 'max', 'min', 'std_dev', 'skewness', 'kurtosis',
+                    'frequency1', 'frequency2', 'frequency3', 'frequency4', 'frequency5',
+                    'amplitude1', 'amplitude2', 'amplitude3', 'amplitude4', 'amplitude5'
+                ]
+                
+                # Create CSV file in Data/{FaultName} directory
+                csv_filename = os.path.join(fault_data_dir, f'{sensor_name}_trend.csv')
+                logger.info(f"📝 Writing CSV: {csv_filename}")
+                
+                with open(csv_filename, 'w', newline='') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    rows_written = 0
+                    
+                    for data_point in extracted_data:
+                        writer.writerow({
+                            'timestamp': data_point.get('timestamp', ''),
+                            'mean': data_point.get('mean', ''),
+                            'max': data_point.get('max', ''),
+                            'min': data_point.get('min', ''),
+                            'std_dev': data_point.get('std_dev', ''),
+                            'skewness': data_point.get('skewness', ''),
+                            'kurtosis': data_point.get('kurtosis', ''),
+                            'frequency1': data_point.get('frequency1', ''),
+                            'frequency2': data_point.get('frequency2', ''),
+                            'frequency3': data_point.get('frequency3', ''),
+                            'frequency4': data_point.get('frequency4', ''),
+                            'frequency5': data_point.get('frequency5', ''),
+                            'amplitude1': data_point.get('amplitude1', ''),
+                            'amplitude2': data_point.get('amplitude2', ''),
+                            'amplitude3': data_point.get('amplitude3', ''),
+                            'amplitude4': data_point.get('amplitude4', ''),
+                            'amplitude5': data_point.get('amplitude5', '')
+                        })
+                        rows_written += 1
+                
+                logger.info(f"✅ CSV created: {csv_filename} ({rows_written} rows)")
+                created_files.append(csv_filename)
+                
+            except Exception as sensor_error:
+                logger.error(f"❌ Error processing {sensor_name}: {sensor_error}")
+                import traceback
+                logger.error(traceback.format_exc())
+                continue
         
+        if not created_files:
+            error_msg = "No CSV files were created - all sensors had no data or encountered errors"
+            logger.error(f"❌ {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg
+            }
+        
+        logger.info(f"🎉 Event creation successful! Created {len(created_files)} CSV files")
         return {
             'success': True,
             'fault_name': fault_name,
-            'deviation_point': deviation_idx,
-            'intervals_extracted': len(extracted_data),
+            'deviation_points': deviation_points,
+            'intervals_extracted': extracted_counts,
             'files_created': created_files,
             'data_dir': fault_data_dir,
             'event_dir': fault_event_dir
         }
         
     except Exception as e:
-        logger.error(f"Error creating fault event CSV: {e}")
+        logger.error(f"❌ Error creating fault event CSV: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return {
