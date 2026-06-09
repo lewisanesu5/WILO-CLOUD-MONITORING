@@ -237,36 +237,18 @@ def detect_fault_deviation(sensor_data, window_size=5):
 def create_fault_event_csv(fault_name, num_intervals_before=3):
     """
     Extract historical trend data and generate CSV content for each sensor.
-    On local: Creates files in Data/[FaultName]/ and Events/[FaultName]/
-    On Render: Returns CSV content in response (filesystem is ephemeral)
+    Creates files in Data/{FaultName}/{timestamp}/ folder structure.
+    Timestamp is extracted from the first database record timestamp.
     
     Args:
         fault_name: Name of the fault (e.g., "Motor Stall")
         num_intervals_before: Number of intervals to include before deviation point
     
     Returns:
-        Dict with creation status, CSV data, and metadata
+        Dict with creation status, CSV data, file paths, and metadata
     """
     try:
         logger.info(f"🔄 START: Creating event for fault: {fault_name}")
-        
-        # Create fault data and event directories (for local development)
-        fault_data_dir = os.path.join(DATA_DIR, fault_name)
-        fault_event_dir = os.path.join(EVENTS_DIR, fault_name)
-        
-        logger.info(f"📁 Creating data directory: {fault_data_dir}")
-        try:
-            os.makedirs(fault_data_dir, exist_ok=True)
-            logger.info(f"✓ Data directory ready: {fault_data_dir}")
-        except Exception as dir_error:
-            logger.warning(f"⚠️ Could not create data directory (may be on Render): {dir_error}")
-        
-        logger.info(f"📁 Creating event directory: {fault_event_dir}")
-        try:
-            os.makedirs(fault_event_dir, exist_ok=True)
-            logger.info(f"✓ Event directory ready: {fault_event_dir}")
-        except Exception as dir_error:
-            logger.warning(f"⚠️ Could not create event directory (may be on Render): {dir_error}")
         
         # Fetch historical data from database
         logger.info(f"🗄️ Fetching historical data for fault: {fault_name}")
@@ -284,6 +266,37 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
                 'success': False,
                 'error': error_msg
             }
+        
+        # Extract timestamp from first available record
+        timestamp_str = None
+        for sensor_name in ['acceleration', 'current', 'audio']:
+            sensor_data = historical_data.get(sensor_name, [])
+            if sensor_data and sensor_data[0].get('timestamp'):
+                timestamp_str = sensor_data[0]['timestamp']
+                break
+        
+        if not timestamp_str:
+            timestamp_str = dt.datetime.now().isoformat()
+        
+        logger.info(f"📅 Using timestamp from database: {timestamp_str}")
+        
+        # Create fault data directory with timestamp subfolder
+        fault_data_dir = os.path.join(DATA_DIR, fault_name, timestamp_str)
+        fault_event_dir = os.path.join(EVENTS_DIR, fault_name, timestamp_str)
+        
+        logger.info(f"📁 Creating timestamped data directory: {fault_data_dir}")
+        try:
+            os.makedirs(fault_data_dir, exist_ok=True)
+            logger.info(f"✓ Data directory ready: {fault_data_dir}")
+        except Exception as dir_error:
+            logger.warning(f"⚠️ Could not create data directory: {dir_error}")
+        
+        logger.info(f"📁 Creating timestamped event directory: {fault_event_dir}")
+        try:
+            os.makedirs(fault_event_dir, exist_ok=True)
+            logger.info(f"✓ Event directory ready: {fault_event_dir}")
+        except Exception as dir_error:
+            logger.warning(f"⚠️ Could not create event directory: {dir_error}")
         
         # Process each sensor/physical parameter
         created_files = []
@@ -354,7 +367,7 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
                 csv_data[sensor_name] = csv_text
                 logger.info(f"✅ CSV generated for {sensor_name} ({rows_written} rows)")
                 
-                # Also try to write to disk (for local development)
+                # Write to disk in timestamped folder
                 csv_filename = os.path.join(fault_data_dir, f'{sensor_name}_trend.csv')
                 try:
                     with open(csv_filename, 'w', newline='') as csvfile:
@@ -384,9 +397,10 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         return {
             'success': True,
             'fault_name': fault_name,
+            'timestamp': timestamp_str,
             'deviation_points': deviation_points,
             'intervals_extracted': extracted_counts,
-            'csv_data': csv_data,  # CSV content for immediate use
+            'csv_data': csv_data,  # CSV content for immediate download
             'files_created': created_files,
             'data_dir': fault_data_dir,
             'event_dir': fault_event_dir

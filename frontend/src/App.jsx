@@ -906,10 +906,14 @@ function App() {
             `Total intervals extracted: ${intervalsInfo}\n` +
             `CSV files generated: ${data.files_created?.length || (data.csv_data ? Object.keys(data.csv_data).length : 0)}`);
       
-      // If CSV data is in response, optionally auto-download or display
-      if (data.csv_data) {
+      // If CSV data is in response, auto-download CSVs with timestamp folder structure
+      if (data.csv_data && data.timestamp) {
         console.log('CSV data available for download:', Object.keys(data.csv_data));
-        // Optional: Auto-download CSVs
+        console.log('Timestamp:', data.timestamp);
+        // Auto-download CSVs with folder structure in filename
+        downloadEventCSVs(faultType, data.csv_data, data.timestamp);
+      } else if (data.csv_data) {
+        console.log('CSV data available but no timestamp');
         downloadEventCSVs(faultType, data.csv_data);
       }
       
@@ -925,10 +929,15 @@ function App() {
   };
 
   // Download CSV files generated from event creation
-  const downloadEventCSVs = (faultName, csvData) => {
+  const downloadEventCSVs = (faultName, csvData, timestamp = null) => {
     try {
       Object.entries(csvData).forEach(([sensorName, csvContent]) => {
-        const filename = `${faultName}_${sensorName}_trend.csv`;
+        // Create filename with folder structure embedded (Data/FaultName/timestamp/sensor_trend.csv)
+        const timestampFolder = timestamp ? timestamp.replace(/[:\-]/g, '_').split('T')[0] : 'latest';
+        const filename = timestamp 
+          ? `Data_${faultName.replace(/ /g, '_')}_${timestampFolder}_${sensorName}_trend.csv`
+          : `${faultName}_${sensorName}_trend.csv`;
+        
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -939,7 +948,13 @@ function App() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       });
-      console.log('CSV files downloaded successfully');
+      
+      if (timestamp) {
+        const folderPath = `Data/${faultName}/${timestamp}`;
+        console.log(`[i] CSV files downloaded - organize in folder structure: ${folderPath}`);
+      } else {
+        console.log('CSV files downloaded successfully');
+      }
     } catch (error) {
       console.error('Error downloading CSV files:', error);
     }
