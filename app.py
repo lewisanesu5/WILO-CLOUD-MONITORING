@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import os
 import sys
@@ -1965,15 +1965,16 @@ def get_sequential_faults_status():
 @app.route('/')
 def serve_index():
     """Serve the React frontend index.html"""
-    return app.send_static_file('index.html')
+    return send_from_directory(app.static_folder, 'index.html')
 
 
 @app.route('/<path:path>')
 def serve_static(path):
     """Serve static files or fall back to index.html for React routing"""
-    if os.path.exists(os.path.join(app.static_folder, path)):
-        return app.send_static_file(path)
-    return app.send_static_file('index.html')
+    file_path = os.path.join(app.static_folder, path)
+    if os.path.isfile(file_path):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, 'index.html')
 
 
 if __name__ == '__main__':
