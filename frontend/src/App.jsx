@@ -791,17 +791,6 @@ function EnhancedStatisticsTable({ dbStats, selectedSensor, mode }) {
           </tbody>
         </table>
       </div>
-
-      {/* FOOTER */}
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-5 py-3 border-t border-gray-200 flex items-center justify-between text-xs text-gray-600">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold">📅 Updated:</span>
-          <span className="font-mono text-gray-700">{sensorStats.timestamp ? new Date(sensorStats.timestamp).toLocaleString() : 'N/A'}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="font-semibold">🗄️ PostgreSQL</span>
-        </div>
-      </div>
     </div>
   );
 }
