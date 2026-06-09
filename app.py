@@ -23,7 +23,7 @@ from event_manager import EventManager
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='frontend/dist', static_url_path='')
 
 # CORS configuration - allow frontend and production domains
 ALLOWED_ORIGINS = [
@@ -1959,6 +1959,21 @@ def get_sequential_faults_status():
     except Exception as e:
         logger.error(f'Error getting sequential faults status: {e}')
         return jsonify({'error': str(e)}), 500
+
+
+# ==================== FRONTEND ROUTES ====================
+@app.route('/')
+def serve_index():
+    """Serve the React frontend index.html"""
+    return app.send_static_file('index.html')
+
+
+@app.route('/<path:path>')
+def serve_static(path):
+    """Serve static files or fall back to index.html for React routing"""
+    if os.path.exists(os.path.join(app.static_folder, path)):
+        return app.send_static_file(path)
+    return app.send_static_file('index.html')
 
 
 if __name__ == '__main__':
