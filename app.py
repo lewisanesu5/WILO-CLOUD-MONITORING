@@ -1432,26 +1432,26 @@ def get_combined_dashboard_data():
                 
                 if row:
                     latest_stats[sensor] = {
-                        'min': row['x_min'],
-                        'max': row['x_max'],
-                        'mean': row['mean'],
-                        'std_dev': row['standard_deviation'],
-                        'skewness': row['skewness'],
-                        'kurtosis': row['kurtosis'],
-                        'frequency1': row.get('frequency1'),
-                        'frequency2': row.get('frequency2'),
-                        'frequency3': row.get('frequency3'),
-                        'frequency4': row.get('frequency4'),
-                        'frequency5': row.get('frequency5'),
-                        'amplitude1': row.get('amplitude1'),
-                        'amplitude2': row.get('amplitude2'),
-                        'amplitude3': row.get('amplitude3'),
-                        'amplitude4': row.get('amplitude4'),
-                        'amplitude5': row.get('amplitude5'),
+                        'min': float(row['x_min']) if row['x_min'] is not None else 0,
+                        'max': float(row['x_max']) if row['x_max'] is not None else 0,
+                        'mean': float(row['mean']) if row['mean'] is not None else 0,
+                        'std_dev': float(row['standard_deviation']) if row['standard_deviation'] is not None else 0,
+                        'skewness': float(row['skewness']) if row['skewness'] is not None else 0,
+                        'kurtosis': float(row['kurtosis']) if row['kurtosis'] is not None else 0,
+                        'frequency1': float(row.get('frequency1', 0) or 0),
+                        'frequency2': float(row.get('frequency2', 0) or 0),
+                        'frequency3': float(row.get('frequency3', 0) or 0),
+                        'frequency4': float(row.get('frequency4', 0) or 0),
+                        'frequency5': float(row.get('frequency5', 0) or 0),
+                        'amplitude1': float(row.get('amplitude1', 0) or 0),
+                        'amplitude2': float(row.get('amplitude2', 0) or 0),
+                        'amplitude3': float(row.get('amplitude3', 0) or 0),
+                        'amplitude4': float(row.get('amplitude4', 0) or 0),
+                        'amplitude5': float(row.get('amplitude5', 0) or 0),
                         'timestamp': row['created_at'].isoformat() if row['created_at'] else None,
                         'source': 'database'
                     }
-                    logger.info(f"{sensor} data: freq1={row.get('frequency1')}, amp1={row.get('amplitude1')}")
+                    logger.info(f"✓ {sensor}: freq1={latest_stats[sensor]['frequency1']}, amp1={latest_stats[sensor]['amplitude1']}")
                 else:
                     latest_stats[sensor] = None
                     
