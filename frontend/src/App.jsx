@@ -621,23 +621,13 @@ function EventModal({
 
         <div className="space-y-4">
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Event Time</label>
-            <input
-              type="datetime-local"
-              value={eventTime}
-              onChange={(e) => onEventTimeChange(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Event Type</label>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Fault Type</label>
             <select
               value={eventName}
               onChange={(e) => onEventNameChange(e.target.value)}
               className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200"
             >
-              <option value="">-- Select event type --</option>
+              <option value="">-- Select fault type --</option>
               {EVENT_TYPES.map((group) => (
                 <optgroup key={group.label} label={group.label}>
                   {group.options.map((option) => (
@@ -654,7 +644,7 @@ function EventModal({
                 type="text"
                 value={customEventName}
                 onChange={(e) => onCustomEventNameChange(e.target.value)}
-                placeholder="Enter custom event name..."
+                placeholder="Enter custom fault name..."
                 className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200"
               />
             )}
@@ -666,7 +656,7 @@ function EventModal({
               value={eventDescription}
               onChange={(e) => onEventDescriptionChange(e.target.value)}
               rows={3}
-              placeholder="Enter additional details about the event..."
+              placeholder="Enter additional details about the fault event..."
               className="w-full resize-none rounded-lg border border-slate-300 bg-white px-4 py-2 text-slate-900 shadow-sm focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200"
             />
           </div>
@@ -828,13 +818,7 @@ function App() {
   const [eventIntervalCount, setEventIntervalCount] = useState(0);
   const [faultStatusMessage, setFaultStatusMessage] = useState('');
 
-  // Phase 4: Sequential Fault Runner Control
-  const [sequentialRunnerActive, setSequentialRunnerActive] = useState(false);
-  const [sequentialRunnerStatus, setSequentialRunnerStatus] = useState('Ready');
-  const [sequentialRunnerProgress, setSequentialRunnerProgress] = useState({ current: 0, total: 1 });
-  const [selectedFaultForRunner, setSelectedFaultForRunner] = useState('Motor Stall');
-  const [currentFaultName, setCurrentFaultName] = useState('');
-  const [sequentialLogs, setSequentialLogs] = useState([]);
+
   
   // Countdown timer for next data point (30-second intervals)
   const [countdownSeconds, setCountdownSeconds] = useState(0);
@@ -855,44 +839,42 @@ function App() {
   const handleCreateEvent = async () => {
     const faultType = eventName === '__custom__' ? customEventName.trim() : eventName;
 
-    if (!eventTime || !faultType) {
-      alert('Please select a fault type and event time');
+    if (!faultType) {
+      alert('Please select a fault type');
       return;
     }
 
     setEventSubmitting(true);
 
     try {
-      // Call the simulate-event endpoint instead of create-event
-      const response = await fetch(`${API_BASE_URL}/simulate-event`, {
+      // Call the new event creation from history endpoint
+      const response = await fetch(`${API_BASE_URL}/api/create-event-from-history`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          fault_type: faultType,
-          event_time: new Date(eventTime).toISOString(),
-          description: eventDescription
+          fault_name: faultType
         })
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to simulate event');
+        throw new Error(data.error || 'Failed to create event from historical data');
       }
 
-      // Show success with sensor data preview
-      alert(`✓ Event "${faultType}" simulated successfully!\n\n` +
-            `Files copied: ${data.files_copied.join(', ')}\n` +
-            `Database updated with sensor readings.`);
+      // Show success with event details
+      alert(`✓ Event "${faultType}" created successfully!\n\n` +
+            `Deviation detected at interval: ${data.deviation_point}\n` +
+            `Total intervals extracted: ${data.intervals_extracted}\n` +
+            `CSV files created: ${data.files_created.length}`);
       
-      // Refresh sensor data to show the simulated event
-      await fetchSensorData('max');
+      // Refresh events to show the new extraction
       await fetchEvents();
       closeEventModal();
     } catch (error) {
-      console.error('Error simulating event:', error);
+      console.error('Error creating event from history:', error);
       alert(`Error: ${error.message}`);
     } finally {
       setEventSubmitting(false);
@@ -1126,108 +1108,7 @@ function App() {
     }
   };
 
-  // ======================== SEQUENTIAL FAULT RUNNER FUNCTIONS ========================
-  
-  const startSequentialRunner = async () => {
-    try {
-      setSequentialRunnerActive(true);
-      setSequentialRunnerStatus('Starting...');
-      setSequentialLogs([]);
-      setSequentialRunnerProgress({ current: 0, total: 1 });
-      
-      // Set activeFault to enable plot data polling (30-second intervals)
-      setActiveFault(selectedFaultForRunner);
-      setEventFailureDetected(false);
-      setEventIntervalCount(0);
-      setFaultTrendData(null);
-      setFaultCurrentData(null);
-      
-      const response = await fetch(`${API_BASE_URL}/api/start-sequential-faults`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          fault_name: selectedFaultForRunner
-        })
-      });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to start fault');
-      }
-
-      setSequentialRunnerStatus('Running...');
-      setSequentialLogs([`✓ Starting ${selectedFaultForRunner}...`, '🔄 Generating fault data...', '📊 Plotting every 30 seconds...']);
-    } catch (error) {
-      console.error('Error starting sequential runner:', error);
-      setSequentialRunnerStatus(`Error: ${error.message}`);
-      setSequentialRunnerActive(false);
-      setActiveFault(null);
-    }
-  };
-
-  const stopSequentialRunner = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/stop-sequential-faults`, {
-        method: 'POST'
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to stop sequential faults');
-      }
-
-      setSequentialRunnerActive(false);
-      setSequentialRunnerStatus('Stopped by user');
-      setSequentialLogs(prev => [...prev, '⏹️ Sequential runner stopped']);
-      setActiveFault(null);
-    } catch (error) {
-      console.error('Error stopping sequential runner:', error);
-    }
-  };
-
-  // Poll sequential fault runner status
-  useEffect(() => {
-    if (!sequentialRunnerActive) return;
-
-    const pollSequentialStatus = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/sequential-faults-status`);
-        if (response.ok) {
-          const status = await response.json();
-          
-          if (status) {
-            setSequentialRunnerStatus(status.status || 'Running');
-            setCurrentFaultName(status.current_fault || '');
-            setSequentialRunnerProgress({
-              current: status.current_fault_number || 0,
-              total: status.total_faults || 11
-            });
-
-            // Update logs
-            if (status.last_log) {
-              setSequentialLogs(prev => {
-                const newLogs = [...prev, status.last_log];
-                return newLogs.slice(-8); // Keep last 8 logs
-              });
-            }
-
-            // Check if completed
-            if (status.status === 'completed' || status.status === 'stopped') {
-              setSequentialRunnerActive(false);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error polling sequential status:', error);
-      }
-    };
-
-    // Poll every 2 seconds for responsive UI
-    const interval = setInterval(pollSequentialStatus, 2000);
-    return () => clearInterval(interval);
-  }, [sequentialRunnerActive]);
 
   const openModal = (title, content) => {
     setModalTitle(title);
@@ -1372,159 +1253,6 @@ function App() {
                       </option>
                     ))}
                   </select>
-                </div>
-              </div>
-
-
-
-              {/* SEQUENTIAL FAULT RUNNER CARD - Phase 4 (UPDATED) */}
-              <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-orange-600 hover:shadow-xl transition duration-200">
-                <div className="bg-gradient-to-r from-orange-600 via-amber-500 to-yellow-500 px-6 py-4 border-b-2 border-orange-400">
-                  <h2 className="text-lg font-bold text-white">⚡ Run Selected Fault</h2>
-                  <p className="text-xs text-orange-100 mt-1">Run a single fault from start with fresh intervals</p>
-                </div>
-                <div className="p-5 space-y-4">
-                  {/* Fault Selector Dropdown */}
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-2">Select Fault to Run:</label>
-                    <select
-                      value={selectedFaultForRunner}
-                      onChange={(e) => setSelectedFaultForRunner(e.target.value)}
-                      disabled={sequentialRunnerActive}
-                      className="w-full h-10 bg-gradient-to-r from-gray-50 to-orange-50 text-gray-900 text-sm border-2 border-orange-300 rounded-lg px-3 py-2 font-medium shadow-sm disabled:opacity-60 disabled:cursor-not-allowed focus:border-orange-600 focus:ring-2 focus:ring-orange-200 focus:outline-none transition duration-200"
-                    >
-                      {/* Motor Failures */}
-                      <optgroup label="⚙️ Motor Failures">
-                        <option value="Motor Stall">Motor Stall</option>
-                        <option value="Motor Bearing Failure">Motor Bearing Failure</option>
-                        <option value="Motor Overheating">Motor Overheating</option>
-                        <option value="Motor Winding Failure">Motor Winding Failure</option>
-                        <option value="Motor Shaft Misalignment">Motor Shaft Misalignment</option>
-                        <option value="Motor Vibration Anomaly">Motor Vibration Anomaly</option>
-                        <option value="Motor Electrical Fault">Motor Electrical Fault</option>
-                      </optgroup>
-                      {/* Pump Failures */}
-                      <optgroup label="💧 Pump Failures">
-                        <option value="Pump Seal Leakage">Pump Seal Leakage</option>
-                        <option value="Pump Cavitation">Pump Cavitation</option>
-                        <option value="Pump Impeller Damage">Pump Impeller Damage</option>
-                      </optgroup>
-                      {/* Other */}
-                      <optgroup label="📌 Other">
-                        <option value="Custom Event">Custom Event</option>
-                      </optgroup>
-                    </select>
-                  </div>
-
-                  {/* Control Buttons */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => startSequentialRunner()}
-                      disabled={sequentialRunnerActive}
-                      className="flex-1 h-10 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg transition duration-200 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-                    >
-                      ▶️ Start
-                    </button>
-                    <button
-                      onClick={stopSequentialRunner}
-                      disabled={!sequentialRunnerActive}
-                      className="flex-1 h-10 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white text-sm font-bold rounded-lg transition duration-200 shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-                    >
-                      ⏹️ Stop
-                    </button>
-                  </div>
-
-                  {/* Status Display */}
-                  {sequentialRunnerActive && (
-                    <div className="p-4 bg-gradient-to-br from-orange-50 to-yellow-50 border-l-4 border-orange-600 rounded-lg space-y-3">
-                      {/* Progress Bar */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-xs font-bold text-orange-900">Progress</p>
-                          <p className="text-xs font-bold text-orange-700">Running...</p>
-                        </div>
-                        <div className="w-full h-2 bg-orange-200 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-orange-500 to-red-500 animate-pulse"
-                            style={{ width: '100%' }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      {/* Current Fault */}
-                      {currentFaultName && (
-                        <div className="p-3 bg-white rounded border-l-4 border-orange-500">
-                          <p className="text-xs font-semibold text-gray-500">Current Fault:</p>
-                          <p className="text-sm font-bold text-orange-900 mt-1">{currentFaultName}</p>
-                        </div>
-                      )}
-
-                      {/* Status Message */}
-                      <p className="text-xs text-orange-700 font-mono bg-orange-100 px-2 py-1 rounded">
-                        {sequentialRunnerStatus}
-                      </p>
-
-                      {/* Countdown Timer */}
-                      {sequentialRunnerActive && !eventFailureDetected && (
-                        <div className="p-3 bg-blue-50 border-l-4 border-blue-600 rounded">
-                          <div className="flex items-center justify-between">
-                            <p className="text-xs font-semibold text-blue-700">Next Data Point In:</p>
-                            <p className="text-xl font-bold text-blue-600">{countdownSeconds}s</p>
-                          </div>
-                          <div className="w-full h-2 bg-blue-200 rounded-full overflow-hidden mt-2">
-                            <div 
-                              className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-1000"
-                              style={{ width: `${(countdownSeconds / 30) * 100}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Failure Info Display */}
-                      {failureInfoDisplay && (
-                        <div className="p-3 bg-red-50 border-l-4 border-red-600 rounded">
-                          <p className="text-xs font-bold text-red-700 mb-1">⚠️ FAILURE DETECTED</p>
-                          <p className="text-sm font-bold text-red-900">Interval {failureInfoDisplay.interval}</p>
-                          <p className="text-xs text-red-600 mt-1">System failure detected. Simulation stopped.</p>
-                        </div>
-                      )}
-
-                      {/* Live Logs */}
-                      {sequentialLogs.length > 0 && (
-                        <div className="p-3 bg-gray-900 rounded border border-gray-700 max-h-32 overflow-y-auto">
-                          <div className="space-y-1">
-                            {sequentialLogs.map((log, idx) => (
-                              <p key={idx} className="text-xs font-mono text-green-400">
-                                {log}
-                              </p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Idle State Info */}
-                  {!sequentialRunnerActive && sequentialLogs.length === 0 && (
-                    <div className="p-4 bg-blue-50 border-l-4 border-blue-600 rounded-lg">
-                      <p className="text-xs text-blue-700 font-semibold mb-2">How it works:</p>
-                      <ul className="text-xs text-blue-600 space-y-1 ml-2">
-                        <li>✓ Select a fault from the dropdown</li>
-                        <li>✓ Click [▶️ Start] to run it</li>
-                        <li>✓ Intervals reset to 1-15 (fresh)</li>
-                        <li>✓ Fault detection within 5-15 range</li>
-                        <li>✓ Data auto-reset before running</li>
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Completed State */}
-                  {!sequentialRunnerActive && sequentialLogs.length > 0 && sequentialRunnerStatus === 'completed' && (
-                    <div className="p-4 bg-green-100 border-l-4 border-green-600 rounded-lg">
-                      <p className="text-sm font-bold text-green-900">✓ Sequence Completed!</p>
-                      <p className="text-xs text-green-700 mt-1">All faults have been generated and monitored.</p>
-                    </div>
-                  )}
                 </div>
               </div>
 

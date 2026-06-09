@@ -1,8 +1,0 @@
-{
-  "fault_name": "Pump Impeller Damage",
-  "start_time": "2026-06-08T01:09:38.761737",
-  "end_time": null,
-  "failure_interval": null,
-  "system_failure_state": false,
-  "intervals": []
-}

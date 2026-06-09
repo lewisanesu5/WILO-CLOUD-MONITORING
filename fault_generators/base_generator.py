@@ -180,6 +180,8 @@ class BaseGenerator:
                 test_json = json.dumps(stats_output)  # Test serialization
                 with open(self.stats_file, 'w') as f:
                     json.dump(stats_output, f, indent=2)
+                # Log successful write with interval count
+                self.logger.info(f"📝 Saved interval {self.interval_count} to stats.json ({len(self.intervals_data)} intervals total)")
             except Exception as json_error:
                 self.logger.error(f"JSON serialization failed: {json_error}")
                 # Try to identify problematic field
@@ -233,6 +235,7 @@ class BaseGenerator:
         """
         timestamps = self.generate_timestamps()
         self.interval_count += 1
+        self.logger.info(f"🔄 Generating interval {self.interval_count}...")
         
         # Generate data based on fault state
         accel_data = self.generate_acceleration_data()
@@ -273,10 +276,11 @@ class BaseGenerator:
             self.logger.info(f"Starting infinite generation loop for {self.fault_name}")
             self.logger.info(f"📊 Plot Interval Range: 1-15")
             self.logger.info(f"⚠️  Fault Detection Range: 5-15")
-            self.logger.info(f"⏱️  Interval Duration: ~30 seconds")
+            self.logger.info(f"⏱️  Interval Duration: ~10 seconds")
             
             while True:
                 should_continue = self.generate_interval()
+                self.logger.debug(f"After interval {self.interval_count}: should_continue={should_continue}, failure_state={self.system_failure_state}")
                 
                 # Log progress
                 self.log_interval_progress(interval_max=15)

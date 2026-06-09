@@ -1,8 +1,0 @@
-{
-  "fault_name": "Motor Stall",
-  "start_time": "2026-06-08T01:02:15.781870",
-  "end_time": null,
-  "failure_interval": null,
-  "system_failure_state": false,
-  "intervals": []
-}

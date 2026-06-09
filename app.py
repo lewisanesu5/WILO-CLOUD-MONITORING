@@ -1,6 +1,8 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os
+import sys
+import subprocess
 import glob
 import csv
 import shutil
@@ -15,7 +17,8 @@ import time
 import multiprocessing
 import threading
 from dotenv import load_dotenv
-from database import save_statistics, test_connection, get_all_latest_statistics_by_mode
+from database import save_statistics, test_connection, get_all_latest_statistics_by_mode, get_connection
+from psycopg2.extras import RealDictCursor
 from event_manager import EventManager
 
 load_dotenv()
@@ -89,22 +92,269 @@ def log_response(response):
     logger.info(f"Access-Control-Allow-Headers: {response.headers.get('Access-Control-Allow-Headers', 'NOT SET')}")
     return response
 
-# ======================== SEQUENTIAL FAULT RUNNER STATE ========================
-sequential_runner_state = {
-    'active': False,
-    'status': 'idle',
-    'current_fault': '',
-    'current_fault_number': 0,
-    'total_faults': 11,
-    'cycles': 1,
-    'last_log': '',
-    'process': None,
-    'lock': threading.Lock()
-}
+
 
 # Sensor configuration
 SENSORS = ['acceleration', 'current', 'audio']
 SAMPLING_RATE = 700  # 1400 points per 2 seconds
+
+# ======================== FAULT EVENT SAVING FUNCTION ========================
+def get_historical_statistics(limit=100):
+    """
+    Query historical statistical data from database.
+    Returns data from all three sensors with timestamps.
+    
+    Returns:
+        {
+            'acceleration': [{'mean': ..., 'max': ..., 'std_dev': ..., 'kurtosis': ..., 'created_at': ...}, ...],
+            'current': [...],
+            'audio': [...]
+        }
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        result = {}
+        sensors = ['acceleration', 'current', 'audio']
+        
+        for sensor in sensors:
+            query = f"""
+                SELECT 
+                    x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                    created_at
+                FROM {sensor}
+                ORDER BY created_at ASC
+                LIMIT %s
+            """
+            cur.execute(query, (limit,))
+            rows = cur.fetchall()
+            
+            result[sensor] = [{
+                'min': row['x_min'],
+                'max': row['x_max'],
+                'mean': row['mean'],
+                'std_dev': row['standard_deviation'],
+                'skewness': row['skewness'],
+                'kurtosis': row['kurtosis'],
+                'timestamp': row['created_at'].isoformat() if row['created_at'] else None
+            } for row in rows]
+        
+        conn.close()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error fetching historical statistics: {e}")
+        return {'acceleration': [], 'current': [], 'audio': []}
+
+
+def detect_fault_deviation(sensor_data, window_size=5):
+    """
+    Detect deviation point where parameters start deviating from normal baseline.
+    Uses moving average and standard deviation to identify anomalies.
+    
+    Returns:
+        Tuple of (deviation_point_index, baseline_stats)
+    """
+    if not sensor_data or len(sensor_data) < window_size:
+        return len(sensor_data) - 1, {}
+    
+    # Calculate baseline from first few points
+    baseline_window = sensor_data[:window_size]
+    baseline_mean_values = [p['mean'] for p in baseline_window]
+    baseline_std_values = [p['std_dev'] for p in baseline_window]
+    
+    baseline = {
+        'mean': np.mean(baseline_mean_values),
+        'std_dev': np.mean(baseline_std_values),
+        'kurtosis': np.mean([p['kurtosis'] for p in baseline_window])
+    }
+    
+    # Look for significant deviation
+    threshold_multiplier = 2.0  # Deviation is 2x baseline std_dev
+    
+    for i in range(window_size, len(sensor_data)):
+        point = sensor_data[i]
+        deviation_from_mean = abs(point['mean'] - baseline['mean'])
+        
+        if deviation_from_mean > threshold_multiplier * baseline['std_dev']:
+            return i, baseline
+    
+    # If no significant deviation found, return last point
+    return len(sensor_data) - 1, baseline
+
+
+def create_fault_event_csv(fault_name, num_intervals_before=3):
+    """
+    Extract historical trend data and create CSV files in Data/[FaultName]/.
+    Creates 3 CSV files: one for each physical parameter (acceleration, current, audio).
+    
+    Args:
+        fault_name: Name of the fault (e.g., "Motor Stall")
+        num_intervals_before: Number of intervals to include before deviation point
+    
+    Returns:
+        Dict with creation status and file paths
+    """
+    try:
+        # Create fault data directory
+        fault_data_dir = os.path.join(DATA_DIR, fault_name)
+        os.makedirs(fault_data_dir, exist_ok=True)
+        
+        # Fetch historical data from database
+        historical_data = get_historical_statistics(limit=100)
+        
+        if not any(historical_data.values()):
+            return {
+                'success': False,
+                'error': 'No historical data available in database'
+            }
+        
+        # Process each sensor/physical parameter
+        created_files = []
+        timestamp = dt.datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        for sensor_name in ['acceleration', 'current', 'audio']:
+            sensor_data = historical_data.get(sensor_name, [])
+            
+            if not sensor_data:
+                logger.warning(f"No data for {sensor_name}")
+                continue
+            
+            # Detect deviation point
+            deviation_idx, baseline = detect_fault_deviation(sensor_data)
+            
+            # Determine extraction range (3 before + from deviation onward)
+            start_idx = max(0, deviation_idx - num_intervals_before)
+            end_idx = len(sensor_data)
+            
+            extracted_data = sensor_data[start_idx:end_idx]
+            
+            # Create CSV file
+            csv_filename = os.path.join(fault_data_dir, f'{fault_name}_{sensor_name}_{timestamp}_event.csv')
+            
+            fieldnames = [
+                'interval', 'timestamp',
+                'mean', 'max', 'min', 'std_dev', 'skewness', 'kurtosis'
+            ]
+            
+            with open(csv_filename, 'w', newline='') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                for idx, data_point in enumerate(extracted_data):
+                    interval_num = start_idx + idx + 1  # Interval numbering
+                    writer.writerow({
+                        'interval': interval_num,
+                        'timestamp': data_point.get('timestamp', ''),
+                        'mean': data_point.get('mean', ''),
+                        'max': data_point.get('max', ''),
+                        'min': data_point.get('min', ''),
+                        'std_dev': data_point.get('std_dev', ''),
+                        'skewness': data_point.get('skewness', ''),
+                        'kurtosis': data_point.get('kurtosis', '')
+                    })
+            
+            logger.info(f"✓ Created event CSV: {csv_filename}")
+            created_files.append(csv_filename)
+        
+        return {
+            'success': True,
+            'fault_name': fault_name,
+            'deviation_point': deviation_idx,
+            'intervals_extracted': len(extracted_data),
+            'files_created': created_files
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating fault event CSV: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def save_fault_event_data(fault_name, stats_data):
+
+    """
+    Save fault event data to CSV when failure occurs.
+    Creates a folder in Data/{FaultName} and saves statistical parameters.
+    Includes 3 intervals before failure + the failure interval.
+    """
+    try:
+        # Get failure interval
+        failure_interval = stats_data.get('failure_interval')
+        if not failure_interval:
+            return  # No failure yet
+        
+        # Create fault folder in Data directory
+        fault_data_dir = os.path.join(DATA_DIR, fault_name)
+        os.makedirs(fault_data_dir, exist_ok=True)
+        
+        # Get all intervals
+        all_intervals = stats_data.get('intervals', [])
+        
+        # Calculate which intervals to include (3 before + failure interval)
+        start_idx = max(0, failure_interval - 4)  # 3 before + failure
+        included_intervals = all_intervals[start_idx:failure_interval]  # Includes failure interval
+        
+        # Create CSV file with timestamp
+        timestamp = dt.datetime.now().strftime('%Y%m%d_%H%M%S')
+        csv_filename = os.path.join(fault_data_dir, f'{fault_name}_{timestamp}_event.csv')
+        
+        # Prepare CSV data with all statistical parameters
+        fieldnames = [
+            'interval', 'timestamp', 'system_failure_state',
+            # Acceleration
+            'accel_mean', 'accel_max', 'accel_min', 'accel_std_dev', 'accel_rms', 'accel_kurtosis', 'accel_skewness',
+            # Current
+            'current_mean', 'current_max', 'current_min', 'current_std_dev', 'current_rms',
+            # Audio
+            'audio_mean', 'audio_max', 'audio_min', 'audio_std_dev', 'audio_rms'
+        ]
+        
+        with open(csv_filename, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for interval_data in included_intervals:
+                accel_stats = interval_data.get('acceleration', {})
+                current_stats = interval_data.get('current', {})
+                audio_stats = interval_data.get('audio', {})
+                
+                row = {
+                    'interval': interval_data.get('interval'),
+                    'timestamp': interval_data.get('timestamp'),
+                    'system_failure_state': interval_data.get('system_failure_state', False),
+                    # Acceleration
+                    'accel_mean': accel_stats.get('mean', ''),
+                    'accel_max': accel_stats.get('max', ''),
+                    'accel_min': accel_stats.get('min', ''),
+                    'accel_std_dev': accel_stats.get('std_dev', ''),
+                    'accel_rms': accel_stats.get('rms', ''),
+                    'accel_kurtosis': accel_stats.get('kurtosis', ''),
+                    'accel_skewness': accel_stats.get('skewness', ''),
+                    # Current
+                    'current_mean': current_stats.get('mean', ''),
+                    'current_max': current_stats.get('max', ''),
+                    'current_min': current_stats.get('min', ''),
+                    'current_std_dev': current_stats.get('std_dev', ''),
+                    'current_rms': current_stats.get('rms', ''),
+                    # Audio
+                    'audio_mean': audio_stats.get('mean', ''),
+                    'audio_max': audio_stats.get('max', ''),
+                    'audio_min': audio_stats.get('min', ''),
+                    'audio_std_dev': audio_stats.get('std_dev', ''),
+                    'audio_rms': audio_stats.get('rms', '')
+                }
+                writer.writerow(row)
+        
+        logger.info(f"✓ Saved fault event data: {csv_filename}")
+        return csv_filename
+        
+    except Exception as e:
+        logger.error(f"Error saving fault event data: {e}")
+        return None
 
 # Upload security configuration
 UPLOAD_API_KEYS = {
@@ -1051,6 +1301,31 @@ def create_event():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/create-event-from-history', methods=['POST'])
+def create_event_from_history():
+    """
+    Create event data extraction from historical database records.
+    Queries historical statistical data, detects deviation point, and creates CSV files.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        fault_name = data.get('fault_name')
+        
+        if not fault_name:
+            return jsonify({'error': 'fault_name is required'}), 400
+        
+        result = create_fault_event_csv(fault_name)
+        
+        if result['success']:
+            return jsonify(result), 201
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f'Error creating event from history: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/available-faults', methods=['GET'])
 def get_available_faults():
     """Get list of available fault types that can be simulated."""
@@ -1215,6 +1490,10 @@ def get_fault_trend(fault_name):
                 'audio_max': audio_stats.get('max', 0)
             })
         
+        # Save fault event data to CSV when failure occurs
+        if stats_data.get('system_failure_state') and stats_data.get('failure_interval'):
+            save_fault_event_data(fault_name, stats_data)
+        
         return jsonify({
             'fault_name': fault_name,
             'start_time': stats_data.get('start_time'),
@@ -1280,140 +1559,104 @@ def get_fault_current(fault_name):
 
 
 # ======================== SEQUENTIAL FAULT RUNNER ENDPOINTS ========================
+# Global variable to track active subprocess
+_sequential_runner_process = None
+_sequential_runner_lock = threading.Lock()
 
 @app.route('/api/start-sequential-faults', methods=['POST'])
 def start_sequential_faults():
     """
-    Start a single fault generator.
-    Runs the selected fault with fresh data and interval reset.
+    Start a sequential fault generator subprocess.
+    Clears old stats.json before starting a new simulation.
     """
+    global _sequential_runner_process
+    
     try:
-        data = request.get_json() or {}
-        fault_name = data.get('fault_name', 'Motor Stall')
-
-        with sequential_runner_state['lock']:
-            # Check if process is actually still running
-            if sequential_runner_state['active']:
-                process = sequential_runner_state['process']
-                # If process exists, check if it's still alive
-                if process and process.poll() is not None:
-                    # Process has finished, reset the state
-                    logger.info(f"Previous process finished, resetting state")
-                    sequential_runner_state['active'] = False
-                    sequential_runner_state['process'] = None
-                    sequential_runner_state['status'] = 'idle'
-                else:
-                    # Process still running
-                    return jsonify({'error': 'Fault runner already active'}), 409
-
-            # Import here to avoid circular imports
-            import subprocess
-            import sys
-
-            # Start the fault runner in a subprocess with fault name as argument
-            cmd = [
-                sys.executable,
-                'run_sequence_generator.py',
-                '--fault',
-                fault_name
-            ]
-
-            try:
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,
-                    text=True,
-                    cwd=BASE_DIR
+        data = request.get_json(silent=True) or {}
+        fault_name = data.get('fault_name')
+        
+        if not fault_name:
+            return jsonify({'error': 'fault_name is required'}), 400
+        
+        with _sequential_runner_lock:
+            # Stop any existing runner
+            if _sequential_runner_process and _sequential_runner_process.poll() is None:
+                try:
+                    _sequential_runner_process.terminate()
+                    _sequential_runner_process.wait(timeout=5)
+                except:
+                    _sequential_runner_process.kill()
+            
+            # Clear old stats.json before starting new simulation
+            events_dir = os.path.join(EVENTS_DIR, fault_name)
+            stats_file = os.path.join(events_dir, 'stats.json')
+            if os.path.exists(stats_file):
+                try:
+                    os.remove(stats_file)
+                    logger.info(f'Cleared old stats.json for {fault_name}')
+                except Exception as e:
+                    logger.warning(f'Could not clear old stats.json: {e}')
+            
+            # Create events directory if needed
+            os.makedirs(events_dir, exist_ok=True)
+            
+            # Start subprocess
+            log_file = os.path.join(BASE_DIR, 'fault_generators_subprocess.log')
+            with open(log_file, 'w') as log:
+                _sequential_runner_process = subprocess.Popen(
+                    [sys.executable, 'fault_generator_launcher.py', fault_name],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    cwd=BASE_DIR,
+                    buffering=1,  # Line buffering
+                    text=True
                 )
-
-                sequential_runner_state['active'] = True
-                sequential_runner_state['status'] = 'running'
-                sequential_runner_state['process'] = process
-                sequential_runner_state['current_fault'] = fault_name
-                sequential_runner_state['current_fault_number'] = 1
-                sequential_runner_state['total_faults'] = 1
-                sequential_runner_state['last_log'] = f'✓ Running {fault_name}...'
-
-                logger.info(f"Fault generator started for: {fault_name}")
-                
-                # Start background thread to monitor subprocess completion
-                def monitor_subprocess():
-                    """Monitor subprocess and reset active flag when done."""
-                    try:
-                        process.wait()  # Wait for process to complete
-                        with sequential_runner_state['lock']:
-                            sequential_runner_state['active'] = False
-                            sequential_runner_state['status'] = 'completed'
-                            sequential_runner_state['process'] = None
-                        logger.info(f"Fault generator completed for: {fault_name}")
-                    except Exception as e:
-                        logger.error(f"Error monitoring subprocess: {e}")
-                        with sequential_runner_state['lock']:
-                            sequential_runner_state['active'] = False
-                            sequential_runner_state['process'] = None
-                
-                monitor_thread = threading.Thread(target=monitor_subprocess, daemon=True)
-                monitor_thread.start()
-
-                return jsonify({
-                    'status': 'started',
-                    'message': f'Fault generator started for {fault_name}',
-                    'fault_name': fault_name,
-                    'pid': process.pid
-                }), 200
-
-            except Exception as e:
-                logger.error(f"Failed to start fault generator: {e}")
-                sequential_runner_state['active'] = False
-                sequential_runner_state['process'] = None
-                return jsonify({'error': f'Failed to start process: {str(e)}'}), 500
-
+            
+            logger.info(f'Started sequential runner for {fault_name} (PID: {_sequential_runner_process.pid})')
+        
+        return jsonify({
+            'success': True,
+            'message': f'Started fault generator for {fault_name}',
+            'fault_name': fault_name
+        }), 200
+        
     except Exception as e:
-        logger.error(f'Error starting fault generator: {e}')
+        logger.error(f'Error starting sequential faults: {e}', exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/stop-sequential-faults', methods=['POST'])
 def stop_sequential_faults():
     """
-    Stop the sequential fault runner process.
+    Stop the active sequential fault generator subprocess.
     """
+    global _sequential_runner_process
+    
     try:
-        with sequential_runner_state['lock']:
-            process = sequential_runner_state['process']
+        with _sequential_runner_lock:
+            if not _sequential_runner_process or _sequential_runner_process.poll() is not None:
+                # No active runner
+                return jsonify({
+                    'success': False,
+                    'message': 'No active fault generator running'
+                }), 404
             
-            if not process or not sequential_runner_state['active']:
-                return jsonify({'error': 'No active sequential runner'}), 404
-
+            # Terminate gracefully
+            _sequential_runner_process.terminate()
             try:
-                # Send Ctrl+C to the process
-                process.terminate()
-                process.wait(timeout=5)
-                
-                sequential_runner_state['active'] = False
-                sequential_runner_state['status'] = 'stopped'
-                sequential_runner_state['last_log'] = '⏹️ Stopped by user'
-
-                logger.info("Sequential fault runner stopped")
-
-                return jsonify({
-                    'status': 'stopped',
-                    'message': 'Sequential fault runner stopped successfully'
-                }), 200
-
+                _sequential_runner_process.wait(timeout=5)
+                logger.info('Sequential runner stopped gracefully')
             except subprocess.TimeoutExpired:
-                # Force kill if terminate doesn't work
-                process.kill()
-                sequential_runner_state['active'] = False
-                sequential_runner_state['status'] = 'killed'
-                
-                return jsonify({
-                    'status': 'killed',
-                    'message': 'Sequential fault runner force terminated'
-                }), 200
-
+                _sequential_runner_process.kill()
+                logger.info('Sequential runner killed after timeout')
+            
+            _sequential_runner_process = None
+        
+        return jsonify({
+            'success': True,
+            'message': 'Fault generator stopped'
+        }), 200
+        
     except Exception as e:
         logger.error(f'Error stopping sequential faults: {e}')
         return jsonify({'error': str(e)}), 500
@@ -1422,59 +1665,22 @@ def stop_sequential_faults():
 @app.route('/api/sequential-faults-status', methods=['GET'])
 def get_sequential_faults_status():
     """
-    Get the current status of the sequential fault runner.
-    Used by frontend for polling and progress updates.
+    Get status of sequential fault generator.
     """
+    global _sequential_runner_process
+    
     try:
-        status_file = os.path.join(BASE_DIR, '.sequential_runner_status.json')
+        with _sequential_runner_lock:
+            is_running = _sequential_runner_process and _sequential_runner_process.poll() is None
+            
+        return jsonify({
+            'running': is_running,
+            'pid': _sequential_runner_process.pid if is_running else None
+        }), 200
         
-        # Try to read status from file (written by run_sequence_generator.py)
-        if os.path.exists(status_file):
-            try:
-                with open(status_file, 'r') as f:
-                    return jsonify(json.load(f)), 200
-            except:
-                pass
-
-        # Return default state if file doesn't exist or can't be read
-        with sequential_runner_state['lock']:
-            status_dict = {
-                'active': sequential_runner_state['active'],
-                'status': sequential_runner_state['status'],
-                'current_fault': sequential_runner_state['current_fault'],
-                'current_fault_number': sequential_runner_state['current_fault_number'],
-                'total_faults': sequential_runner_state['total_faults'],
-                'cycles': sequential_runner_state['cycles'],
-                'last_log': sequential_runner_state['last_log']
-            }
-
-            # Check if process is still running
-            if sequential_runner_state['process'] and sequential_runner_state['active']:
-                poll_result = sequential_runner_state['process'].poll()
-                if poll_result is not None:  # Process has terminated
-                    sequential_runner_state['active'] = False
-                    sequential_runner_state['status'] = 'completed'
-                    status_dict['status'] = 'completed'
-                    logger.info("Sequential fault runner process completed")
-
-            return jsonify(status_dict), 200
-
     except Exception as e:
         logger.error(f'Error getting sequential faults status: {e}')
         return jsonify({'error': str(e)}), 500
-
-
-# ======================== HELPER FUNCTION FOR SEQUENTIAL RUNNER ========================
-
-def update_sequential_runner_status(fault_name, fault_number, log_message):
-    """
-    Update the sequential runner state (called from run_sequence_generator.py)
-    """
-    with sequential_runner_state['lock']:
-        sequential_runner_state['current_fault'] = fault_name
-        sequential_runner_state['current_fault_number'] = fault_number
-        sequential_runner_state['last_log'] = log_message
-        logger.info(f"Sequential runner: {fault_name} ({fault_number}/11) - {log_message}")
 
 
 if __name__ == '__main__':
