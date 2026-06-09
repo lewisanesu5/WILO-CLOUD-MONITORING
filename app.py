@@ -62,14 +62,16 @@ except Exception as e:
 # Configure directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Detect if running on Render (persistent disk at /data/events)
-RUNNING_ON_RENDER = os.path.exists('/data/events') or os.environ.get('RENDER') == 'true'
+# Detect if running on Render (check for RENDER env var or typical Render paths)
+RUNNING_ON_RENDER = 'RENDER' in os.environ or '/opt/render' in BASE_DIR
 
 if RUNNING_ON_RENDER:
-    # Use persistent disk on Render
-    DATA_DIR = '/data/events/Data'
-    EVENTS_DIR = '/data/events/Events'
-    logger.info("📍 Running on Render - using persistent disk at /data/events")
+    # Use persistent disk on Render - ensure it exists
+    PERSISTENT_DISK_PATH = '/data/events'
+    os.makedirs(PERSISTENT_DISK_PATH, exist_ok=True)
+    DATA_DIR = os.path.join(PERSISTENT_DISK_PATH, 'Data')
+    EVENTS_DIR = os.path.join(PERSISTENT_DISK_PATH, 'Events')
+    logger.info(f"📍 Running on Render - using persistent disk at {PERSISTENT_DISK_PATH}")
 else:
     # Use local directories
     DATA_DIR = os.path.join(BASE_DIR, 'Data')
