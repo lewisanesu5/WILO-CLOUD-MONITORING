@@ -677,87 +677,155 @@ function EventModal({
  * EnhancedStatisticsTable Component
  * Displays database statistics for selected sensor
  * - Shows latest data from PostgreSQL database
- * - Professional table design with sticky headers
- * - Improved readability with proper typography hierarchy
+ * - Beautiful table design with category grouping
+ * - Statistical parameters, frequencies, and amplitudes organized by type
+ * - Professional footer with metadata
  */
 function EnhancedStatisticsTable({ dbStats, selectedSensor, mode }) {
   const sensorStats = dbStats[selectedSensor];
 
   if (!sensorStats) {
     return (
-      <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600 p-6">
-        <div className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-6 py-5 border-b-2 border-emerald-400 mb-4 -mx-6 -mt-6">
-          <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">📊 Database Statistics</h3>
+      <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600 p-8">
+        <div className="text-center py-12">
+          <div className="text-5xl mb-4">📊</div>
+          <h3 className="text-xl font-bold text-emerald-900 mb-2">Database Statistics</h3>
+          <p className="text-emerald-600">No data available for {selectedSensor} sensor</p>
         </div>
-        <p className="text-gray-400 text-center py-8">No database statistics available for {selectedSensor}</p>
       </div>
     );
   }
 
-  const parameters = [
-    { key: 'mean', label: 'Mean' },
-    { key: 'max', label: 'Max' },
-    { key: 'min', label: 'Min' },
-    { key: 'std_dev', label: 'Standard Deviation' },
-    { key: 'skewness', label: 'Skewness' },
-    { key: 'kurtosis', label: 'Kurtosis' },
-    { key: 'frequency1', label: 'Frequency 1 (Hz)' },
-    { key: 'frequency2', label: 'Frequency 2 (Hz)' },
-    { key: 'frequency3', label: 'Frequency 3 (Hz)' },
-    { key: 'frequency4', label: 'Frequency 4 (Hz)' },
-    { key: 'frequency5', label: 'Frequency 5 (Hz)' },
-    { key: 'amplitude1', label: 'Amplitude 1' },
-    { key: 'amplitude2', label: 'Amplitude 2' },
-    { key: 'amplitude3', label: 'Amplitude 3' },
-    { key: 'amplitude4', label: 'Amplitude 4' },
-    { key: 'amplitude5', label: 'Amplitude 5' }
+  // Organize parameters by category
+  const statisticalParams = [
+    { key: 'mean', label: 'Mean', icon: '📈', color: 'blue' },
+    { key: 'max', label: 'Maximum', icon: '⬆️', color: 'red' },
+    { key: 'min', label: 'Minimum', icon: '⬇️', color: 'green' },
+    { key: 'std_dev', label: 'Std Deviation', icon: '📊', color: 'purple' },
   ];
 
+  const distributionParams = [
+    { key: 'skewness', label: 'Skewness', icon: '🔄', color: 'orange' },
+    { key: 'kurtosis', label: 'Kurtosis', icon: '📐', color: 'indigo' },
+  ];
+
+  const frequencyParams = [
+    { key: 'frequency1', label: 'F1', icon: '🔊' },
+    { key: 'frequency2', label: 'F2', icon: '🔊' },
+    { key: 'frequency3', label: 'F3', icon: '🔊' },
+    { key: 'frequency4', label: 'F4', icon: '🔊' },
+    { key: 'frequency5', label: 'F5', icon: '🔊' },
+  ];
+
+  const amplitudeParams = [
+    { key: 'amplitude1', label: 'A1', icon: '📡' },
+    { key: 'amplitude2', label: 'A2', icon: '📡' },
+    { key: 'amplitude3', label: 'A3', icon: '📡' },
+    { key: 'amplitude4', label: 'A4', icon: '📡' },
+    { key: 'amplitude5', label: 'A5', icon: '📡' },
+  ];
+
+  const formatValue = (value) => {
+    return value !== undefined && value !== null 
+      ? (typeof value === 'number' ? value.toFixed(4) : value)
+      : '—';
+  };
+
+  const renderParamRow = (param, isSmall = false) => (
+    <div key={param.key} className={`flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition ${isSmall ? 'text-sm' : ''}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-lg">{param.icon}</span>
+        <span className="font-medium text-gray-700">{param.label}</span>
+      </div>
+      <span className="font-bold text-gray-900 tabular-nums">{formatValue(sensorStats[param.key])}</span>
+    </div>
+  );
+
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col h-full border-l-4 border-emerald-600 hover:shadow-xl transition duration-200">
-      {/* Card Header */}
-      <div className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-6 py-5 border-b-2 border-emerald-400">
-        <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">📊 Database Statistics</h3>
-        <p className="text-xs text-emerald-100">
-          Sensor: <span className="font-semibold capitalize bg-emerald-700 bg-opacity-50 px-2 py-1 rounded">{selectedSensor}</span> • 
-          Last Updated: <span className="font-semibold bg-emerald-700 bg-opacity-50 px-2 py-1 rounded">{sensorStats.timestamp ? new Date(sensorStats.timestamp).toLocaleString() : 'N/A'}</span>
-        </p>
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden border-l-4 border-emerald-600 hover:shadow-xl transition duration-200 flex flex-col h-full">
+      {/* HEADER */}
+      <div className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 px-6 py-6 border-b-2 border-emerald-400">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-bold text-white mb-1 flex items-center gap-2">
+              📊 Database Statistics
+            </h3>
+            <p className="text-emerald-100 text-sm">
+              Sensor: <span className="font-semibold capitalize bg-emerald-700 bg-opacity-50 px-3 py-1 rounded-full">{selectedSensor.toUpperCase()}</span>
+            </p>
+          </div>
+        </div>
       </div>
 
-      <div className="px-6 py-5">
-        <table className="w-full text-sm">
-          <thead className="bg-gradient-to-r from-emerald-50 to-teal-50 border-b-2 border-emerald-300">
-            <tr>
-              <th className="px-5 py-3 text-left font-bold text-emerald-900 whitespace-nowrap">Parameter</th>
-              <th className="px-5 py-3 text-right font-bold text-emerald-900 whitespace-nowrap">Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {parameters.map((param, idx) => {
-              // Group parameters visually
-              const isFrequency = param.key.startsWith('frequency');
-              const isAmplitude = param.key.startsWith('amplitude');
-              const bgClass = isFrequency ? 'bg-blue-50 hover:bg-blue-100' : isAmplitude ? 'bg-green-50 hover:bg-green-100' : idx % 2 === 0 ? 'bg-white hover:bg-gray-50' : 'bg-gray-50 hover:bg-gray-100';
-              const hoverClass = 'transition duration-200';
+      {/* CONTENT SECTIONS */}
+      <div className="flex-1 px-6 py-6 space-y-6 overflow-y-auto">
+        {/* Statistical Parameters Section */}
+        <div>
+          <h4 className="text-sm font-bold text-emerald-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <span className="text-lg">📈</span> Core Statistics
+          </h4>
+          <div className="grid grid-cols-2 gap-3">
+            {statisticalParams.map(param => renderParamRow(param))}
+          </div>
+        </div>
 
-              return (
-                <tr key={param.key} className={`${bgClass} ${hoverClass} border-b border-gray-200 cursor-pointer`}>
-                  <td className="px-5 py-3 font-semibold text-gray-800 flex items-center gap-2">
-                    {isFrequency && <span className="text-yellow-600 text-lg">🔊</span>}
-                    {isAmplitude && <span className="text-green-600 text-lg">📊</span>}
-                    {!isFrequency && !isAmplitude && <span className="text-gray-400">•</span>}
-                    {param.label}
-                  </td>
-                  <td className="px-5 py-3 text-right font-bold text-gray-900 tabular-nums">
-                    {sensorStats[param.key] !== undefined && sensorStats[param.key] !== null 
-                      ? (typeof sensorStats[param.key] === 'number' ? sensorStats[param.key].toFixed(4) : sensorStats[param.key])
-                      : '—'}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        {/* Distribution Parameters Section */}
+        <div>
+          <h4 className="text-sm font-bold text-orange-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <span className="text-lg">🔄</span> Distribution Analysis
+          </h4>
+          <div className="grid grid-cols-2 gap-3">
+            {distributionParams.map(param => renderParamRow(param))}
+          </div>
+        </div>
+
+        {/* Frequencies Section */}
+        <div>
+          <h4 className="text-sm font-bold text-yellow-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <span className="text-lg">🔊</span> Frequency Components (Hz)
+          </h4>
+          <div className="grid grid-cols-5 gap-2">
+            {frequencyParams.map(param => (
+              <div key={param.key} className="bg-yellow-50 rounded-lg p-3 text-center hover:bg-yellow-100 transition">
+                <div className="text-lg mb-1">{param.icon}</div>
+                <div className="text-xs font-bold text-gray-700 mb-1">{param.label}</div>
+                <div className="text-sm font-bold text-yellow-900 tabular-nums">{formatValue(sensorStats[param.key])}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Amplitudes Section */}
+        <div>
+          <h4 className="text-sm font-bold text-blue-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <span className="text-lg">📡</span> Amplitude Components
+          </h4>
+          <div className="grid grid-cols-5 gap-2">
+            {amplitudeParams.map(param => (
+              <div key={param.key} className="bg-blue-50 rounded-lg p-3 text-center hover:bg-blue-100 transition">
+                <div className="text-lg mb-1">{param.icon}</div>
+                <div className="text-xs font-bold text-gray-700 mb-1">{param.label}</div>
+                <div className="text-sm font-bold text-blue-900 tabular-nums">{formatValue(sensorStats[param.key])}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* FOOTER */}
+      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-t border-gray-200">
+        <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-gray-600 gap-3">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">📅 Last Updated:</span>
+            <span className="text-gray-700 font-mono">
+              {sensorStats.timestamp ? new Date(sensorStats.timestamp).toLocaleString() : 'N/A'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">🗄️ Source:</span>
+            <span className="px-2 py-1 bg-emerald-100 text-emerald-800 rounded-full font-semibold">PostgreSQL Database</span>
+          </div>
+        </div>
       </div>
     </div>
   );

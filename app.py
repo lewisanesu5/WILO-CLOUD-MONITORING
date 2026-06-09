@@ -1438,8 +1438,16 @@ def get_combined_dashboard_data():
                         'std_dev': row['standard_deviation'],
                         'skewness': row['skewness'],
                         'kurtosis': row['kurtosis'],
-                        'frequencies': [row[f'frequency{i}'] for i in range(1, 6)],
-                        'amplitudes': [row[f'amplitude{i}'] for i in range(1, 6)],
+                        'frequency1': row['frequency1'],
+                        'frequency2': row['frequency2'],
+                        'frequency3': row['frequency3'],
+                        'frequency4': row['frequency4'],
+                        'frequency5': row['frequency5'],
+                        'amplitude1': row['amplitude1'],
+                        'amplitude2': row['amplitude2'],
+                        'amplitude3': row['amplitude3'],
+                        'amplitude4': row['amplitude4'],
+                        'amplitude5': row['amplitude5'],
                         'timestamp': row['created_at'].isoformat() if row['created_at'] else None,
                         'source': 'database'
                     }
