@@ -1394,6 +1394,73 @@ def db_diagnostic():
         }), 500
 
 
+@app.route('/api/latest-statistics', methods=['GET'])
+def get_latest_db_statistics():
+    """
+    Fetch latest statistics from database for dashboard display.
+    Returns the most recent record from each sensor table.
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        result = {}
+        sensors = ['acceleration', 'current', 'audio']
+        
+        for sensor in sensors:
+            try:
+                query = f"""
+                    SELECT 
+                        x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                        frequency1, frequency2, frequency3, frequency4, frequency5,
+                        amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
+                        created_at
+                    FROM {sensor}
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """
+                cur.execute(query)
+                row = cur.fetchone()
+                
+                if row:
+                    result[sensor] = {
+                        'min': row['x_min'],
+                        'max': row['x_max'],
+                        'mean': row['mean'],
+                        'std_dev': row['standard_deviation'],
+                        'skewness': row['skewness'],
+                        'kurtosis': row['kurtosis'],
+                        'frequencies': [row[f'frequency{i}'] for i in range(1, 6)],
+                        'amplitudes': [row[f'amplitude{i}'] for i in range(1, 6)],
+                        'timestamp': row['created_at'].isoformat() if row['created_at'] else None
+                    }
+                    logger.info(f"✓ Fetched latest {sensor} stats from database")
+                else:
+                    result[sensor] = None
+                    logger.info(f"✗ No data found for {sensor}")
+                    
+            except Exception as sensor_error:
+                logger.error(f"Error fetching {sensor}: {sensor_error}")
+                result[sensor] = None
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'timestamp': dt.datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching latest statistics: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/create-event-from-history', methods=['POST'])
 def create_event_from_history():
     """
