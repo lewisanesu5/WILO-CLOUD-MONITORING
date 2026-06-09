@@ -885,11 +885,32 @@ function App() {
   const fetchSensorData = async (selectedMode = 'max') => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/api/sensor-data?mode=${selectedMode}`);
+      // Use database stats endpoint which fetches latest data directly from PostgreSQL
+      const response = await fetch(`${API_BASE_URL}/api/database-stats`);
       if (!response.ok) throw new Error('Failed to fetch sensor data');
       
       const result = await response.json();
-      setSensorData(result.data || {});
+      
+      // Transform database stats into the format expected by the dashboard
+      const transformedData = {};
+      if (result.data) {
+        Object.entries(result.data).forEach(([sensor, data]) => {
+          if (data) {
+            transformedData[sensor] = {
+              stats: data.stats,
+              frequencies: data.frequencies,
+              amplitudes: data.amplitudes,
+              health: data.health,
+              data_points: data.data_points,
+              raw_timestamps: [],
+              raw_values: [],
+              file_timestamp: data.timestamp
+            };
+          }
+        });
+      }
+      
+      setSensorData(transformedData);
       setLastUpdate(new Date().toLocaleTimeString());
       setError(null);
     } catch (err) {

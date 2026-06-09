@@ -919,7 +919,87 @@ def get_sensor_data():
         })
     except Exception as e:
         logger.error(f"API error: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/database-stats', methods=['GET'])
+def get_database_stats():
+    """
+    Get latest statistics directly from database (no CSV file dependency).
+    This is for the dashboard to display recent data from PostgreSQL.
+    """
+    api_start = time.time()
+    try:
+        logger.info("📊 Fetching latest database statistics for dashboard")
+        
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        result = {}
+        sensors = ['acceleration', 'current', 'audio']
+        
+        for sensor in sensors:
+            try:
+                query = f"""
+                    SELECT 
+                        x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                        range, frequency1, frequency2, frequency3, frequency4, frequency5,
+                        amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
+                        created_at
+                    FROM {sensor}
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """
+                cur.execute(query)
+                row = cur.fetchone()
+                
+                if row:
+                    result[sensor] = {
+                        'stats': {
+                            'min': row['x_min'],
+                            'max': row['x_max'],
+                            'mean': row['mean'],
+                            'std_dev': row['standard_deviation'],
+                            'range': row.get('range', 0),
+                            'skewness': row['skewness'],
+                            'kurtosis': row['kurtosis']
+                        },
+                        'frequencies': [row[f'frequency{i}'] for i in range(1, 6)],
+                        'amplitudes': [row[f'amplitude{i}'] for i in range(1, 6)],
+                        'health': 'normal',
+                        'data_points': 1,
+                        'timestamp': row['created_at'].isoformat() if row['created_at'] else None
+                    }
+                    logger.info(f"✓ {sensor}: latest stats from {row['created_at']}")
+                else:
+                    result[sensor] = None
+                    logger.warning(f"✗ No data found for {sensor}")
+                    
+            except Exception as sensor_error:
+                logger.error(f"✗ Error fetching {sensor}: {sensor_error}")
+                result[sensor] = None
+        
+        conn.close()
+        
+        api_time = time.time() - api_start
+        
+        return jsonify({
+            'status': 'success',
+            'data': result,
+            'timestamp': dt.datetime.now().isoformat(),
+            'response_time_ms': round(api_time * 1000, 2)
+        })
+        
+    except Exception as e:
+        logger.error(f"✗ Error fetching database stats: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 @app.route('/api/sensor/<sensor_name>')
 def get_sensor_detail(sensor_name):
