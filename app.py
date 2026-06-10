@@ -130,6 +130,7 @@ def get_historical_statistics(limit=100):
     """
     Query historical statistical data from database.
     Returns data from all three sensors with timestamps.
+    Filters for MAX file data only (skips MIN and COMBINED).
     
     Returns:
         {
@@ -153,15 +154,16 @@ def get_historical_statistics(limit=100):
                         x_min, x_max, mean, standard_deviation, skewness, kurtosis,
                         frequency1, frequency2, frequency3, frequency4, frequency5,
                         amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
-                        created_at
+                        created_at, file_type
                     FROM {sensor}
+                    WHERE file_type = 'max'
                     ORDER BY created_at ASC
                     LIMIT %s
                 """
                 cur.execute(query, (limit,))
                 rows = cur.fetchall()
                 
-                logger.info(f"✓ Fetched {len(rows)} records from {sensor} table")
+                logger.info(f"✓ Fetched {len(rows)} MAX records from {sensor} table")
                 
                 result[sensor] = [{
                     'min': row['x_min'],
@@ -188,7 +190,7 @@ def get_historical_statistics(limit=100):
         
         # Log total records fetched
         total_records = sum(len(v) for v in result.values())
-        logger.info(f"📊 Total records fetched: {total_records} (accel: {len(result['acceleration'])}, current: {len(result['current'])}, audio: {len(result['audio'])})")
+        logger.info(f"📊 Total MAX records fetched: {total_records} (accel: {len(result['acceleration'])}, current: {len(result['current'])}, audio: {len(result['audio'])})")
         
         return result
         

@@ -74,10 +74,10 @@ def save_statistics(sensor_name, mode, stats_dict, frequencies, amplitudes):
             INSERT INTO {table_name} 
             (x_min, x_max, mean, range, standard_deviation, skewness, kurtosis,
              frequency1, frequency2, frequency3, frequency4, frequency5,
-             amplitude1, amplitude2, amplitude3, amplitude4, amplitude5)
+             amplitude1, amplitude2, amplitude3, amplitude4, amplitude5, file_type)
             VALUES (%s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s)
         """
         
         query_start = time.time()
@@ -90,7 +90,8 @@ def save_statistics(sensor_name, mode, stats_dict, frequencies, amplitudes):
             stats_dict.get('skewness', 0),      # skewness
             stats_dict.get('kurtosis', 0),      # kurtosis
             freqs[0], freqs[1], freqs[2], freqs[3], freqs[4],  # frequency1-5
-            amps[0], amps[1], amps[2], amps[3], amps[4]        # amplitude1-5
+            amps[0], amps[1], amps[2], amps[3], amps[4],       # amplitude1-5
+            mode                                 # file_type signature (max, min, or combined)
         ))
         query_time = time.time() - query_start
         
