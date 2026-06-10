@@ -277,6 +277,68 @@ def test_connection():
 
 # ==================== EVENT DATA INSERTION FUNCTIONS ====================
 
+def create_event_table_if_not_exists(table_name):
+    """
+    Create a failure-specific event table if it doesn't already exist.
+    Called before inserting data to ensure table is ready.
+    
+    Args:
+        table_name: Name of the table (e.g., "pump_seal_leakage")
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Create table if it doesn't exist
+        create_query = f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                {table_name}_id SERIAL PRIMARY KEY,
+                fault_id INTEGER NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                x_min FLOAT,
+                x_max FLOAT,
+                mean FLOAT,
+                standard_deviation FLOAT,
+                range FLOAT,
+                variance FLOAT,
+                skewness FLOAT,
+                kurtosis FLOAT,
+                frequency1 FLOAT,
+                frequency2 FLOAT,
+                frequency3 FLOAT,
+                frequency4 FLOAT,
+                frequency5 FLOAT,
+                amplitude1 FLOAT,
+                amplitude2 FLOAT,
+                amplitude3 FLOAT,
+                amplitude4 FLOAT,
+                amplitude5 FLOAT
+            );
+        """
+        
+        cur.execute(create_query)
+        
+        # Create indices
+        cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_fault_id ON {table_name}(fault_id);")
+        cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_timestamp ON {table_name}(timestamp);")
+        
+        conn.commit()
+        logger.info(f"✓ Event table '{table_name}' ensured to exist")
+        
+    except Exception as e:
+        logger.error(f"Error creating event table '{table_name}': {e}")
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+
+
 def get_next_fault_id(failure_type):
     """
     Get the next fault_id for a given failure type.
@@ -293,6 +355,9 @@ def get_next_fault_id(failure_type):
         table_name = FAILURE_TABLE_MAPPING.get(failure_type)
         if not table_name:
             raise ValueError(f"Unknown failure type: {failure_type}")
+        
+        # Ensure table exists before querying
+        create_event_table_if_not_exists(table_name)
         
         conn = get_connection()
         cur = conn.cursor()
