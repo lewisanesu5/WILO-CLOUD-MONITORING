@@ -372,13 +372,24 @@ class EventManager:
     def list_events(self) -> List[Dict]:
         """
         List all logged events with their metadata.
+        Returns empty list if directory doesn't exist (e.g., on Render).
         
         Returns:
-            List of event metadata dicts
+            List of event metadata dicts (or empty list if directory doesn't exist)
         """
         events = []
         
-        for filename in os.listdir(self.events_dir):
+        # Handle case where events directory doesn't exist (e.g., on Render)
+        if not os.path.exists(self.events_dir):
+            return events
+        
+        try:
+            filenames = os.listdir(self.events_dir)
+        except OSError as e:
+            print(f"⚠️ Could not list events directory: {e}")
+            return events
+        
+        for filename in filenames:
             if filename.endswith('.json'):
                 json_path = os.path.join(self.events_dir, filename)
                 try:
