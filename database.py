@@ -411,3 +411,104 @@ def insert_event_data_to_database(failure_type, slope_data, event_statistics):
     finally:
         if conn:
             conn.close()
+
+
+def insert_event_from_historical_data(failure_type, extracted_data):
+    """
+    Insert event data from historical extraction into the appropriate failure table in Neon.
+    Used when creating events from existing historical database records.
+    
+    Args:
+        failure_type: Name of the failure (e.g., "Motor Stall")
+        extracted_data: List of dicts with historical stat columns
+        
+    Returns:
+        Dict with fault_id, rows_inserted, and table name
+    """
+    conn = None
+    rows_inserted = 0
+    fault_id = None
+    
+    try:
+        # Get table name and validate
+        table_name = FAILURE_TABLE_MAPPING.get(failure_type)
+        if not table_name:
+            raise ValueError(f"Unknown failure type: {failure_type}")
+        
+        # Get next fault_id for this failure type
+        fault_id = get_next_fault_id(failure_type)
+        
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Prepare insert query
+        query = f"""
+            INSERT INTO {table_name}
+            (fault_id, timestamp, x_min, x_max, mean, standard_deviation, range, variance,
+             skewness, kurtosis, frequency1, frequency2, frequency3, frequency4, frequency5,
+             amplitude1, amplitude2, amplitude3, amplitude4, amplitude5)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        # Insert each historical data point with the new fault_id
+        for data_point in extracted_data:
+            try:
+                # Parse timestamp if it's a string
+                timestamp_val = data_point.get('timestamp', datetime.now())
+                if isinstance(timestamp_val, str):
+                    try:
+                        timestamp_val = datetime.fromisoformat(timestamp_val)
+                    except:
+                        timestamp_val = datetime.now()
+                
+                cur.execute(query, (
+                    fault_id,                                           # fault_id
+                    timestamp_val,                                      # timestamp
+                    data_point.get('min', 0),                          # x_min
+                    data_point.get('max', 0),                          # x_max
+                    data_point.get('mean', 0),                         # mean
+                    data_point.get('std_dev', 0),                      # standard_deviation
+                    data_point.get('range', 0),                        # range
+                    data_point.get('variance', 0),                     # variance
+                    data_point.get('skewness', 0),                     # skewness
+                    data_point.get('kurtosis', 0),                     # kurtosis
+                    data_point.get('frequency1', 0),                   # frequency1
+                    data_point.get('frequency2', 0),                   # frequency2
+                    data_point.get('frequency3', 0),                   # frequency3
+                    data_point.get('frequency4', 0),                   # frequency4
+                    data_point.get('frequency5', 0),                   # frequency5
+                    data_point.get('amplitude1', 0),                   # amplitude1
+                    data_point.get('amplitude2', 0),                   # amplitude2
+                    data_point.get('amplitude3', 0),                   # amplitude3
+                    data_point.get('amplitude4', 0),                   # amplitude4
+                    data_point.get('amplitude5', 0)                    # amplitude5
+                ))
+                rows_inserted += 1
+                
+            except Exception as e:
+                logger.error(f"Error inserting historical data point for {failure_type}: {e}")
+                raise
+        
+        # Commit all inserts
+        conn.commit()
+        
+        logger.info(
+            f"✓ Event saved to database from historical data: "
+            f"Table={table_name}, fault_id={fault_id}, rows={rows_inserted}"
+        )
+        
+        return {
+            'success': True,
+            'fault_id': fault_id,
+            'rows_inserted': rows_inserted,
+            'table_name': table_name
+        }
+        
+    except Exception as e:
+        logger.error(f"Error inserting historical event data for {failure_type}: {e}")
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()

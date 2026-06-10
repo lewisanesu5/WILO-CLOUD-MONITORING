@@ -900,10 +900,20 @@ function App() {
         ? Object.entries(data.intervals_extracted).map(([sensor, count]) => `${sensor}: ${count}`).join(', ')
         : 'N/A';
 
-      // Show success with event details
-      alert(`✓ Event "${faultType}" created successfully!\n\n` +
-            `Deviation detected at: ${deviationInfo}\n` +
-            `Total intervals extracted: ${intervalsInfo}`);
+      // Build success message with database info
+      let successMsg = `✓ Event "${faultType}" created successfully!\n\n`;
+      successMsg += `📊 Data Analysis:\n`;
+      successMsg += `  Deviation at: ${deviationInfo}\n`;
+      successMsg += `  Intervals extracted: ${intervalsInfo}\n`;
+      
+      if (data.fault_id !== null && data.rows_inserted) {
+        successMsg += `\n💾 Database:\n`;
+        successMsg += `  Fault ID: ${data.fault_id}\n`;
+        successMsg += `  Rows inserted: ${data.rows_inserted}\n`;
+        successMsg += `  Table: ${data.database_table || 'N/A'}`;
+      }
+      
+      alert(successMsg);
       
       // Refresh events to show the new extraction
       await fetchEvents();

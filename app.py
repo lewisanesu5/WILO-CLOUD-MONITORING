@@ -18,7 +18,7 @@ import time
 import multiprocessing
 import threading
 from dotenv import load_dotenv
-from database import save_statistics, test_connection, get_all_latest_statistics_by_mode, get_connection
+from database import save_statistics, test_connection, get_all_latest_statistics_by_mode, get_connection, insert_event_from_historical_data
 from psycopg2.extras import RealDictCursor
 from event_manager import EventManager
 
@@ -310,6 +310,7 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         csv_data = {}  # Store CSV content for response
         deviation_points = {}
         extracted_counts = {}
+        all_extracted_data = []  # Collect all extracted data for database insertion
         
         # Define fieldnames for CSVs
         fieldnames = [
@@ -340,6 +341,9 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
                 extracted_data = sensor_data[start_idx:end_idx]
                 extracted_counts[sensor_name] = len(extracted_data)
                 logger.info(f"✂️ {sensor_name}: extracting {len(extracted_data)} records (indices {start_idx}-{end_idx})")
+                
+                # Collect all extracted data for database insertion
+                all_extracted_data.extend(extracted_data)
                 
                 # Generate CSV content in memory
                 logger.info(f"📝 Generating CSV for {sensor_name}")
@@ -400,6 +404,28 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
                 'error': error_msg
             }
         
+        # ==================== INSERT TO NEON DATABASE ====================
+        fault_id = None
+        rows_inserted = 0
+        database_table = None
+        
+        try:
+            if all_extracted_data:
+                db_result = insert_event_from_historical_data(fault_name, all_extracted_data)
+                fault_id = db_result['fault_id']
+                rows_inserted = db_result['rows_inserted']
+                database_table = db_result['table_name']
+                
+                logger.info(f"✓ Event data inserted to database!")
+                logger.info(f"  Table: {database_table}")
+                logger.info(f"  Fault ID: {fault_id}")
+                logger.info(f"  Rows Inserted: {rows_inserted}")
+            else:
+                logger.warning(f"⚠️ No extracted data to insert to database")
+        except Exception as db_error:
+            logger.error(f"❌ Error saving to database: {db_error}")
+            # Continue anyway - data extraction was successful
+        
         logger.info(f"🎉 Event creation successful! Generated {len(csv_data)} CSV datasets")
         return {
             'success': True,
@@ -407,6 +433,9 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
             'timestamp': timestamp_str,
             'deviation_points': deviation_points,
             'intervals_extracted': extracted_counts,
+            'fault_id': fault_id,
+            'rows_inserted': rows_inserted,
+            'database_table': database_table,
             'csv_data': csv_data,  # CSV content for immediate download
             'files_created': created_files,
             'data_dir': fault_data_dir,
