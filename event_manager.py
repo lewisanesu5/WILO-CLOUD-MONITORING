@@ -85,12 +85,11 @@ class EventManager:
         Initialize the Event Manager.
         
         Args:
-            events_dir: Directory to store event CSVs
+            events_dir: Directory to store event CSVs (only on local, not on Render)
             data_dir: Directory containing max_reading CSV files
         """
         self.events_dir = events_dir
         self.data_dir = data_dir
-        os.makedirs(self.events_dir, exist_ok=True)
     
     def _load_all_data_points(self) -> List[Tuple[float, float]]:
         """
@@ -319,7 +318,7 @@ class EventManager:
             print(f"❌ Error saving to database: {e}")
             raise
 
-        # ==================== SAVE METADATA JSON FOR REFERENCE ====================
+        # ==================== SAVE METADATA JSON FOR REFERENCE (LOCAL ONLY) ====================
         event_name_safe = event_name.replace(' ', '_').replace('/', '-')
         failure_date_str = failure_dt.strftime('%Y%m%d_%H%M%S')
         event_id = f"{event_name_safe}_{failure_date_str}"
@@ -353,14 +352,17 @@ class EventManager:
             'created_at': datetime.datetime.now().isoformat()
         }
         
-        # Write metadata JSON
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2)
+        # Try to write metadata JSON (optional, for local development reference only)
+        try:
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+        except (PermissionError, OSError):
+            # On Render or if no write permissions, skip - data is in database anyway
+            print(f"   ℹ️ Metadata JSON not saved to file (database has all data)")
         
         return {
             'success': True,
             'event_id': event_id,
-            'json_file': json_filename,
             'fault_id': fault_id,
             'rows_inserted': rows_inserted,
             'database_table': db_result['table_name'],
