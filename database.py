@@ -4,12 +4,28 @@ import os
 from dotenv import load_dotenv
 import logging
 import time
+from datetime import datetime
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv('DATABASE_URL')
+
+# ==================== FAILURE TABLE MAPPING ====================
+FAILURE_TABLE_MAPPING = {
+    'Motor Bearing Failure': 'motor_bearing_failure',
+    'Motor Electrical Fault': 'motor_electrical_fault',
+    'Motor Overheating': 'motor_overheating',
+    'Motor Shaft Misalignment': 'motor_shaft_misalignment',
+    'Motor Stall': 'motor_stall',
+    'Motor Vibration Anomaly': 'motor_vibration_anomaly',
+    'Motor Winding Failure': 'motor_winding_failure',
+    'Pump Cavitation': 'pump_cavitation',
+    'Pump Impeller Damage': 'pump_impeller_damage',
+    'Pump Seal Leakage': 'pump_seal_leakage',
+    'Custom Event': 'custom_fault'
+}
 
 def get_connection():
     """Get database connection with timeout"""
@@ -255,6 +271,143 @@ def test_connection():
     except Exception as e:
         logger.error(f"Database connection failed: {e}")
         return False
+    finally:
+        if conn:
+            conn.close()
+
+# ==================== EVENT DATA INSERTION FUNCTIONS ====================
+
+def get_next_fault_id(failure_type):
+    """
+    Get the next fault_id for a given failure type.
+    Fault ID increments per event for each failure type independently.
+    
+    Args:
+        failure_type: Name of the failure (e.g., "Motor Stall")
+        
+    Returns:
+        Next fault_id (integer starting from 1)
+    """
+    conn = None
+    try:
+        table_name = FAILURE_TABLE_MAPPING.get(failure_type)
+        if not table_name:
+            raise ValueError(f"Unknown failure type: {failure_type}")
+        
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Get max fault_id from table
+        query = f"SELECT MAX(fault_id) FROM {table_name}"
+        cur.execute(query)
+        result = cur.fetchone()
+        
+        max_fault_id = result[0] if result[0] else 0
+        next_id = max_fault_id + 1
+        
+        logger.info(f"✓ Next fault_id for {failure_type}: {next_id}")
+        return next_id
+        
+    except Exception as e:
+        logger.error(f"Error getting next fault_id for {failure_type}: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+
+def insert_event_data_to_database(failure_type, slope_data, event_statistics):
+    """
+    Insert event data into the appropriate failure-specific table in Neon.
+    
+    Args:
+        failure_type: Name of the failure (e.g., "Motor Stall")
+        slope_data: List of dicts with keys: timestamp, value, slope, time_delta
+        event_statistics: Dict with keys: min, max, mean, std_dev, range, variance, 
+                         skewness, kurtosis, frequency1-5, amplitude1-5
+        
+    Returns:
+        Dict with fault_id, rows_inserted, and table name
+    """
+    conn = None
+    rows_inserted = 0
+    fault_id = None
+    
+    try:
+        # Get table name and validate
+        table_name = FAILURE_TABLE_MAPPING.get(failure_type)
+        if not table_name:
+            raise ValueError(f"Unknown failure type: {failure_type}")
+        
+        # Get next fault_id
+        fault_id = get_next_fault_id(failure_type)
+        
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Prepare insert query
+        query = f"""
+            INSERT INTO {table_name}
+            (fault_id, timestamp, x_min, x_max, mean, standard_deviation, range, variance,
+             skewness, kurtosis, frequency1, frequency2, frequency3, frequency4, frequency5,
+             amplitude1, amplitude2, amplitude3, amplitude4, amplitude5)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        # Insert each data point
+        for point in slope_data:
+            try:
+                # Convert timestamp (milliseconds) to datetime
+                timestamp_dt = datetime.fromtimestamp(point['timestamp'] / 1000)
+                
+                cur.execute(query, (
+                    fault_id,                                           # fault_id
+                    timestamp_dt,                                       # timestamp
+                    event_statistics.get('min', 0),                    # x_min
+                    event_statistics.get('max', 0),                    # x_max
+                    event_statistics.get('mean', 0),                   # mean
+                    event_statistics.get('std_dev', 0),                # standard_deviation
+                    event_statistics.get('range', 0),                  # range
+                    event_statistics.get('variance', 0),               # variance
+                    event_statistics.get('skewness', 0),               # skewness
+                    event_statistics.get('kurtosis', 0),               # kurtosis
+                    event_statistics.get('frequency1', 0),             # frequency1
+                    event_statistics.get('frequency2', 0),             # frequency2
+                    event_statistics.get('frequency3', 0),             # frequency3
+                    event_statistics.get('frequency4', 0),             # frequency4
+                    event_statistics.get('frequency5', 0),             # frequency5
+                    event_statistics.get('amplitude1', 0),             # amplitude1
+                    event_statistics.get('amplitude2', 0),             # amplitude2
+                    event_statistics.get('amplitude3', 0),             # amplitude3
+                    event_statistics.get('amplitude4', 0),             # amplitude4
+                    event_statistics.get('amplitude5', 0)              # amplitude5
+                ))
+                rows_inserted += 1
+                
+            except Exception as e:
+                logger.error(f"Error inserting row for {failure_type}: {e}")
+                raise
+        
+        # Commit all inserts
+        conn.commit()
+        
+        logger.info(
+            f"✓ Event saved to database: "
+            f"Table={table_name}, fault_id={fault_id}, rows={rows_inserted}"
+        )
+        
+        return {
+            'success': True,
+            'fault_id': fault_id,
+            'rows_inserted': rows_inserted,
+            'table_name': table_name
+        }
+        
+    except Exception as e:
+        logger.error(f"Error inserting event data for {failure_type}: {e}")
+        if conn:
+            conn.rollback()
+        raise
     finally:
         if conn:
             conn.close()

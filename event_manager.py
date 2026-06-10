@@ -11,6 +11,7 @@ import datetime
 import numpy as np
 from scipy import stats as sp_stats
 from typing import Dict, List, Tuple, Optional
+from database import insert_event_data_to_database
 
 
 def calculate_statistics(z_values):
@@ -299,64 +300,33 @@ class EventManager:
         # Calculate slopes BACKWARDS from failure to baseline
         slope_data = self._calculate_slopes_backwards(data_points, failure_idx)
         
-        # Create event filename with sanitized event name and timestamp
-        event_name_safe = event_name.replace(' ', '_').replace('/', '-')
-        failure_date_str = failure_dt.strftime('%Y%m%d_%H%M%S')
-        event_id = f"{event_name_safe}_{failure_date_str}"
-        
-        csv_filename = f"{event_id}.csv"
-        json_filename = f"{event_id}.json"
-        
-        csv_path = os.path.join(self.events_dir, csv_filename)
-        json_path = os.path.join(self.events_dir, json_filename)
-        
-        # Copy source CSV to events directory
-        import shutil
-        source_path = os.path.join(self.data_dir, source_filename)
-        archived_source_filename = f"{event_id}_SOURCE_{source_filename}"
-        archived_source_path = os.path.join(self.events_dir, archived_source_filename)
-        
-        try:
-            if os.path.exists(source_path):
-                shutil.copy2(source_path, archived_source_path)
-            else:
-                archived_source_filename = f"Source file {source_filename} not found"
-        except Exception as e:
-            print(f"Error copying source file: {e}")
-            archived_source_filename = f"Error copying {source_filename}"
-        
         # Compute statistics over the entire event data window
         event_values = [p['value'] for p in slope_data]
         event_statistics = calculate_statistics(event_values)
 
-        # Stat column names for CSV
-        stat_keys = [
-            'max', 'min', 'mean', 'abs_mean', 'rms', 'variance', 'std_dev',
-            'peak', 'peak_to_peak', 'crest_factor', 'impulse_factor',
-            'shape_factor', 'clearance_factor', 'skewness', 'kurtosis',
-            'excess_kurtosis', 'energy', 'zero_crossing_rate',
-            'percentile_90', 'percentile_95', 'percentile_99'
-        ]
+        # ==================== INSERT TO NEON DATABASE ====================
+        try:
+            db_result = insert_event_data_to_database(event_name, slope_data, event_statistics)
+            fault_id = db_result['fault_id']
+            rows_inserted = db_result['rows_inserted']
+            
+            print(f"\n✓ Event saved to Neon database!")
+            print(f"  Table: {db_result['table_name']}")
+            print(f"  Fault ID: {fault_id}")
+            print(f"  Rows Inserted: {rows_inserted}")
+            
+        except Exception as e:
+            print(f"❌ Error saving to database: {e}")
+            raise
 
-        # Write CSV with slope data + statistics columns
-        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = ['timestamp', 'timestamp_iso', 'value', 'slope', 'time_delta_seconds'] + stat_keys
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-
-            for point in slope_data:
-                row = {
-                    'timestamp': point['timestamp'],
-                    'timestamp_iso': datetime.datetime.fromtimestamp(point['timestamp'] / 1000).isoformat(),
-                    'value': point['value'],
-                    'slope': point['slope'],
-                    'time_delta_seconds': point['time_delta']
-                }
-                # Add all statistical parameters to each row
-                for key in stat_keys:
-                    row[key] = event_statistics.get(key, 0.0)
-                writer.writerow(row)
-
+        # ==================== SAVE METADATA JSON FOR REFERENCE ====================
+        event_name_safe = event_name.replace(' ', '_').replace('/', '-')
+        failure_date_str = failure_dt.strftime('%Y%m%d_%H%M%S')
+        event_id = f"{event_name_safe}_{failure_date_str}"
+        
+        json_filename = f"{event_id}.json"
+        json_path = os.path.join(self.events_dir, json_filename)
+        
         # Calculate metadata
         time_before_failure = abs(slope_data[0]['time_delta']) if slope_data else 0
         slopes = [p['slope'] for p in slope_data[:-1]]  # Skip last point (failure, slope=0)
@@ -369,10 +339,11 @@ class EventManager:
             'failure_timestamp_ms': failure_timestamp,
             'failure_value': failure_value,
             'source_filename': source_filename,
-            'archived_source_filename': archived_source_filename,
             'actual_data_time_iso': datetime.datetime.fromtimestamp(failure_timestamp / 1000).isoformat(),
             'time_before_failure_seconds': time_before_failure,
             'total_data_points': len(slope_data),
+            'fault_id_in_database': fault_id,
+            'rows_in_database': rows_inserted,
             'slope_statistics': {
                 'max_slope': max(slopes) if slopes else 0,
                 'min_slope': min(slopes) if slopes else 0,
@@ -389,9 +360,10 @@ class EventManager:
         return {
             'success': True,
             'event_id': event_id,
-            'csv_file': csv_filename,
             'json_file': json_filename,
-            'source_file_archived': archived_source_filename,
+            'fault_id': fault_id,
+            'rows_inserted': rows_inserted,
+            'database_table': db_result['table_name'],
             'metadata': metadata
         }
     
