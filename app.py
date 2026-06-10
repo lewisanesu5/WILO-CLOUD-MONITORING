@@ -1149,10 +1149,161 @@ def storage_info():
         logger.error(f"Storage info error: {e}")
         return jsonify({'error': str(e)}), 500
 
+def process_csv_from_memory(file_obj, filename):
+    """
+    Parse CSV file from memory and return timestamps and values.
+    Handles ISO format and numeric timestamps.
+    
+    Returns: (timestamps_list, values_list, row_count)
+    """
+    timestamps = []
+    values = []
+    try:
+        file_obj.seek(0)
+        content = file_obj.read().decode('utf-8')
+        lines = content.strip().split('\n')
+        
+        if len(lines) < 2:
+            return [], [], 0
+        
+        # Parse header
+        header = lines[0].split(',')
+        timestamp_idx = None
+        value_idx = None
+        
+        for idx, col in enumerate(header):
+            col_lower = col.strip().lower()
+            if col_lower == 'timestamp':
+                timestamp_idx = idx
+            elif col_lower == 'value':
+                value_idx = idx
+        
+        if timestamp_idx is None or value_idx is None:
+            logger.error(f"CSV {filename}: Missing required columns (timestamp, value)")
+            return [], [], 0
+        
+        # Parse data rows
+        for line in lines[1:]:
+            if not line.strip():
+                continue
+            try:
+                parts = line.split(',')
+                if len(parts) <= max(timestamp_idx, value_idx):
+                    continue
+                
+                # Handle timestamp
+                timestamp_str = parts[timestamp_idx].strip()
+                if 'T' in timestamp_str:  # ISO format
+                    dt_obj = dt.datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    timestamp = dt_obj.timestamp() * 1000
+                else:
+                    ts_val = float(timestamp_str)
+                    if ts_val < 1e11:
+                        timestamp = ts_val * 1000
+                    else:
+                        timestamp = ts_val
+                
+                value = float(parts[value_idx].strip())
+                timestamps.append(timestamp)
+                values.append(value)
+            except (ValueError, IndexError):
+                continue
+        
+        return timestamps, values, len(values)
+    except Exception as e:
+        logger.error(f"Error processing CSV {filename}: {e}")
+        return [], [], 0
+
+def process_uploaded_csv_and_save_to_db(uploaded_files):
+    """
+    Process uploaded CSV files and save statistics directly to database.
+    Does NOT save files to disk (ephemeral filesystem).
+    
+    Returns: dictionary with processing results
+    """
+    results = {
+        'max': {'acceleration': None, 'current': None, 'audio': None},
+        'min': {'acceleration': None, 'current': None, 'audio': None},
+        'combined': {'acceleration': None, 'current': None, 'audio': None}
+    }
+    
+    # Group files by sensor and mode
+    files_by_mode = {'max': {}, 'min': {}, 'combined': {}}
+    
+    for file_obj in uploaded_files:
+        filename = file_obj.filename
+        file_obj.seek(0)
+        
+        # Parse filename: max_acceleration.csv or min_current.csv
+        parts = filename.replace('.csv', '').split('_')
+        if len(parts) < 2:
+            continue
+        
+        mode = parts[0]  # 'max' or 'min'
+        sensor = '_'.join(parts[1:])  # 'acceleration', 'current', or 'audio'
+        
+        if mode not in files_by_mode or sensor not in SENSORS:
+            continue
+        
+        timestamps, values, row_count = process_csv_from_memory(file_obj, filename)
+        
+        if values:
+            files_by_mode[mode][sensor] = {
+                'timestamps': timestamps,
+                'values': values,
+                'row_count': row_count
+            }
+            logger.info(f"✓ Processed {filename}: {row_count} data points")
+        else:
+            logger.warning(f"✗ No valid data in {filename}")
+    
+    # Now calculate statistics and save to database
+    try:
+        for sensor in SENSORS:
+            # Process MAX mode
+            if sensor in files_by_mode['max']:
+                max_values = files_by_mode['max'][sensor]['values']
+                max_stats = calculate_statistics(max_values)
+                max_frequencies, max_amplitudes = calculate_fft_analysis(max_values)
+                save_statistics(sensor, 'max', max_stats, max_frequencies, max_amplitudes)
+                results['max'][sensor] = True
+                logger.info(f"✓ Saved MAX statistics for {sensor}")
+            
+            # Process MIN mode
+            if sensor in files_by_mode['min']:
+                min_values = files_by_mode['min'][sensor]['values']
+                min_stats = calculate_statistics(min_values)
+                min_frequencies, min_amplitudes = calculate_fft_analysis(min_values)
+                save_statistics(sensor, 'min', min_stats, min_frequencies, min_amplitudes)
+                results['min'][sensor] = True
+                logger.info(f"✓ Saved MIN statistics for {sensor}")
+            
+            # Process COMBINED mode (merge max + min)
+            if sensor in files_by_mode['max'] and sensor in files_by_mode['min']:
+                max_data = files_by_mode['max'][sensor]
+                min_data = files_by_mode['min'][sensor]
+                merged_ts, merged_vals = merge_max_min_files(
+                    max_data['timestamps'], max_data['values'],
+                    min_data['timestamps'], min_data['values']
+                )
+                if merged_vals:
+                    combined_stats = calculate_statistics(merged_vals)
+                    combined_frequencies, combined_amplitudes = calculate_fft_analysis(merged_vals)
+                    save_statistics(sensor, 'combined', combined_stats, combined_frequencies, combined_amplitudes)
+                    results['combined'][sensor] = True
+                    logger.info(f"✓ Saved COMBINED statistics for {sensor}")
+    except Exception as e:
+        logger.error(f"Error saving statistics to database: {e}")
+        raise
+    
+    return results
+
 @app.route('/api/upload', methods=['POST'])
 def upload_files():
     """
     Secure endpoint for remote servers to upload sensor CSV files.
+    Processes CSV data in-memory and saves statistics directly to database.
+    No files are saved to disk (Render has ephemeral filesystem).
     
     Expected:
     - API Key in header: X-API-Key
@@ -1185,10 +1336,10 @@ def upload_files():
                 'error': f'Expected {UPLOAD_BATCH_SIZE} files, got {len(uploaded_files)}'
             }), 400
         
-        saved_files = []
         validation_report = []
         upload_timestamp = dt.datetime.now().isoformat()
         
+        # 3. VALIDATE AND PROCESS FILES IN MEMORY
         for file in uploaded_files:
             if not file or not file.filename.endswith('.csv'):
                 return jsonify({'error': f'Invalid file format: {file.filename}'}), 400
@@ -1213,45 +1364,40 @@ def upload_files():
                     'error': f'Invalid CSV format: {validation_result["error"]}'
                 }), 400
             
-            # Save file
-            try:
-                filepath = os.path.join(DATA_DIR, file.filename)
-                file.seek(0)
-                file.save(filepath)
-                saved_files.append(file.filename)
-                
-                validation_report.append({
-                    'file': file.filename,
-                    'rows': validation_result['row_count'],
-                    'size_kb': round(file_size / 1024, 2),
-                    'status': 'success'
-                })
-                
-                logger.info(f'Successfully saved {file.filename} from {sensor_id} ({validation_result["row_count"]} rows)')
-            except Exception as e:
-                logger.error(f'Failed to save {file.filename}: {str(e)}')
-                return jsonify({'error': f'Failed to save file: {str(e)}'}), 500
+            validation_report.append({
+                'file': file.filename,
+                'rows': validation_result['row_count'],
+                'size_kb': round(file_size / 1024, 2),
+                'status': 'success'
+            })
+            
+            logger.info(f'Validated {file.filename} from {sensor_id} ({validation_result["row_count"]} rows)')
         
-        # 3. LOG UPLOAD EVENT
-        log_upload_event(sensor_id, saved_files, upload_timestamp)
-        
-        # 4. CALCULATE AND SAVE STATISTICS TO DATABASE
+        # 4. PROCESS AND SAVE STATISTICS TO DATABASE (IN-MEMORY)
         try:
-            db_write_start = time.time()
-            sensor_data = load_all_sensor_data_with_modes()
-            db_write_time = time.time() - db_write_start
-            logger.info(f"✓ Statistics calculated and saved to database in {db_write_time*1000:.1f}ms after upload from {sensor_id}")
+            db_start = time.time()
+            process_results = process_uploaded_csv_and_save_to_db(uploaded_files)
+            db_time = time.time() - db_start
+            
+            processed_count = sum(
+                1 for mode_data in process_results.values()
+                for success in mode_data.values()
+                if success
+            )
+            
+            logger.info(f"✓ Processed and saved {processed_count} sensor statistics to database in {db_time*1000:.1f}ms from {sensor_id}")
         except Exception as e:
-            logger.error(f"Warning: Could not save statistics to database after upload: {e}")
-            # Don't fail the upload response - just log the error
+            logger.error(f"Failed to process and save statistics: {e}")
+            return jsonify({'error': f'Failed to save statistics to database: {str(e)}'}), 500
         
         return jsonify({
             'status': 'success',
-            'message': f'Uploaded {len(saved_files)} file(s)',
+            'message': f'Processed {len(uploaded_files)} file(s) and saved statistics to database',
             'sensor_id': sensor_id,
-            'files': saved_files,
+            'files': [f.filename for f in uploaded_files],
             'timestamp': upload_timestamp,
             'validation_report': validation_report,
+            'database_records_saved': processed_count,
             'next_expected_upload': (dt.datetime.now() + dt.timedelta(minutes=120)).isoformat()
         }), 201
         
