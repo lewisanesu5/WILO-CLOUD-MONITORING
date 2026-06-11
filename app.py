@@ -34,11 +34,11 @@ app = Flask(__name__, static_folder='frontend/dist', static_url_path='')
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    # Add your production domain here:
-    # "https://your-domain.com",
-    # "https://your-domain.onrender.com"
+    "https://wilo-cloud-monitoring.onrender.com",
 ]
 
 # Configure CORS with explicit options
