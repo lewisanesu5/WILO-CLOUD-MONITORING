@@ -39,13 +39,13 @@ def generate_mock_csvs():
     timestamps = [base_time + int(x * 1000) for x in t]
     
     max_path = os.path.join(TEST_DIR, "max_acceleration.csv")
-    with open(max_path, "w") as f:
+    with open(max_path, "w", newline="") as f:
         f.write("timestamp,value\n")
         for ts, val in zip(timestamps, max_vals):
             f.write(f"{ts},{val}\n")
             
     min_path = os.path.join(TEST_DIR, "min_acceleration.csv")
-    with open(min_path, "w") as f:
+    with open(min_path, "w", newline="") as f:
         f.write("timestamp,value\n")
         for ts, val in zip(timestamps, min_vals):
             f.write(f"{ts},{val}\n")

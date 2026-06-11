@@ -1479,7 +1479,7 @@ def validate_csv_file(file):
             return {'valid': False, 'error': 'No data rows'}
         
         # Check header
-        header = lines[0].split(',')
+        header = [col.strip() for col in lines[0].split(',')]
         if 'timestamp' not in header or 'value' not in header:
             return {'valid': False, 'error': 'Missing required columns: timestamp, value'}
         
