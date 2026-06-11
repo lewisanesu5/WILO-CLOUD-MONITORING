@@ -1599,6 +1599,132 @@ def file_stats():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/historical-stats')
+def api_historical_stats():
+    """
+    Get database historical statistics for a given sensor.
+    Query params:
+        sensor: 'acceleration', 'current', or 'audio' (required)
+        limit: int (default 25)
+    """
+    sensor = request.args.get('sensor')
+    if not sensor:
+        return jsonify({'error': 'sensor parameter is required'}), 400
+    
+    if sensor not in SENSORS:
+        return jsonify({'error': f'Invalid sensor. Must be one of {SENSORS}'}), 400
+        
+    try:
+        limit = int(request.args.get('limit', 25))
+    except ValueError:
+        return jsonify({'error': 'limit must be an integer'}), 400
+        
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Query sensor table. We want the 25 latest datapoints, but in chronological order (oldest to newest).
+        query = f"""
+            SELECT * FROM (
+                SELECT 
+                    x_min, x_max, mean, standard_deviation, skewness, kurtosis, range,
+                    frequency1, frequency2, frequency3, frequency4, frequency5,
+                    amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
+                    created_at, file_type
+                FROM {sensor}
+                WHERE file_type = 'max'
+                ORDER BY created_at DESC
+                LIMIT %s
+            ) sub
+            ORDER BY created_at ASC
+        """
+        cur.execute(query, (limit,))
+        rows = cur.fetchall()
+        
+        formatted_rows = []
+        for row in rows:
+            formatted_rows.append({
+                'file_timestamp': row['created_at'].isoformat() if row['created_at'] else None,
+                'stats': {
+                    'min': float(row['x_min']) if row['x_min'] is not None else 0,
+                    'max': float(row['x_max']) if row['x_max'] is not None else 0,
+                    'mean': float(row['mean']) if row['mean'] is not None else 0,
+                    'std_dev': float(row['standard_deviation']) if row['standard_deviation'] is not None else 0,
+                    'range': float(row['range']) if row['range'] is not None else 0,
+                    'skewness': float(row['skewness']) if row['skewness'] is not None else 0,
+                    'kurtosis': float(row['kurtosis']) if row['kurtosis'] is not None else 0
+                },
+                'frequencies': [
+                    float(row.get('frequency1', 0) or 0),
+                    float(row.get('frequency2', 0) or 0),
+                    float(row.get('frequency3', 0) or 0),
+                    float(row.get('frequency4', 0) or 0),
+                    float(row.get('frequency5', 0) or 0)
+                ],
+                'amplitudes': [
+                    float(row.get('amplitude1', 0) or 0),
+                    float(row.get('amplitude2', 0) or 0),
+                    float(row.get('amplitude3', 0) or 0),
+                    float(row.get('amplitude4', 0) or 0),
+                    float(row.get('amplitude5', 0) or 0)
+                ]
+            })
+            
+        return jsonify({
+            'status': 'success',
+            'sensor': sensor,
+            'count': len(formatted_rows),
+            'data': formatted_rows
+        })
+    except Exception as e:
+        logger.error(f'Error fetching historical stats for {sensor}: {e}')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route('/api/latest-data-timestamp')
+def latest_data_timestamp():
+    """
+    Get the maximum created_at timestamp across all three sensor tables.
+    Used by frontend to check for new data uploads.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Query the latest created_at across acceleration, current, audio
+        query = """
+            SELECT MAX(created_at) FROM (
+                SELECT MAX(created_at) as created_at FROM acceleration
+                UNION ALL
+                SELECT MAX(created_at) as created_at FROM current
+                UNION ALL
+                SELECT MAX(created_at) as created_at FROM audio
+            ) t
+        """
+        cur.execute(query)
+        res = cur.fetchone()
+        
+        timestamp = None
+        if res and res[0]:
+            timestamp = res[0].isoformat()
+            
+        return jsonify({
+            'status': 'success',
+            'timestamp': timestamp
+        }), 200
+    except Exception as e:
+        logger.error(f'Error fetching latest data timestamp: {e}')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.route('/simulate-event', methods=['POST'])
 def simulate_event():
     """

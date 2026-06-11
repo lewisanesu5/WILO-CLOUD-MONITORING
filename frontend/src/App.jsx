@@ -825,6 +825,7 @@ function App() {
   const [historicalStats, setHistoricalStats] = useState([]);
   const [dbStats, setDbStats] = useState({});  // New: Database statistics
   const [recentFiles, setRecentFiles] = useState([]);  // New: Recent CSV files from database query
+  const [lastDataTimestamp, setLastDataTimestamp] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
   const [modalContent, setModalContent] = useState(null);
@@ -966,45 +967,29 @@ function App() {
 
   const fetchFileHistory = async (sensor) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files`);
-      if (!response.ok) throw new Error('Failed to fetch files');
+      const response = await fetch(`${API_BASE_URL}/api/historical-stats?sensor=${encodeURIComponent(sensor)}&limit=25`);
+      if (!response.ok) throw new Error('Failed to fetch historical stats');
       
-      const allFiles = await response.json();
-      
-      // Filter files for selected sensor
-      const sensorFiles = allFiles
-        .filter(f => f.name.includes(sensor))
-        .sort((a, b) => new Date(b.modified) - new Date(a.modified))
-        .slice(0, 10);
-
-      // Pair max and min files with same timestamp
-      const pairs = [];
-      for (let i = 0; i < sensorFiles.length; i += 2) {
-        if (sensorFiles[i + 1]) {
-          const timestamp = new Date(sensorFiles[i].modified).toLocaleString();
-          pairs.push({
-            timestamp,
-            maxFile: sensorFiles[i].name,
-            minFile: sensorFiles[i + 1].name
-          });
-        }
+      const result = await response.json();
+      if (result.status === 'success' && Array.isArray(result.data)) {
+        const statsData = result.data;
+        // setHistoricalStats expects oldest -> newest
+        setHistoricalStats(statsData);
+        
+        // Generate virtual file history pairs (newest -> oldest) for the sidebar table
+        const recentStats = [...statsData].reverse().slice(0, 5);
+        const virtualHistory = recentStats.map(item => {
+          const formattedDate = item.file_timestamp ? new Date(item.file_timestamp).toLocaleString() : '—';
+          return {
+            timestamp: formattedDate,
+            maxFile: `max_${sensor}.csv`,
+            minFile: `min_${sensor}.csv`
+          };
+        });
+        setFileHistory(virtualHistory);
       }
-      
-      setFileHistory(pairs.slice(0, 5));
-      
-      // Fetch per-file stats for recent files to build historical trend
-      const recentFiles = sensorFiles.slice(0, 6); // up to 6 recent files
-      const statsPromises = recentFiles.map(f =>
-        fetch(`${API_BASE_URL}/api/file-stats?filename=${encodeURIComponent(f.name)}`).then(r => r.ok ? r.json() : null).catch(() => null)
-      );
-
-      const statsResults = await Promise.all(statsPromises);
-      const filtered = statsResults.filter(r => r && r.status === 'success');
-      // Map to an ordered array oldest->newest
-      const ordered = filtered.reverse();
-      setHistoricalStats(ordered);
     } catch (err) {
-      console.error('Error fetching file history:', err);
+      console.error('Error fetching file history from database:', err);
     }
   };
 
@@ -1049,6 +1034,41 @@ function App() {
       return () => clearInterval(interval);
     }
   }, [autoRefresh, mode]);
+
+  // Real-time Auto-refresh: Poll server for latest data arrival timestamp
+  useEffect(() => {
+    const checkLatestDataTimestamp = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/latest-data-timestamp`);
+        if (response.ok) {
+          const result = await response.json();
+          if (result.status === 'success' && result.timestamp) {
+            // Update on first load or if a newer timestamp is detected
+            setLastDataTimestamp(prev => {
+              if (prev !== null && prev !== result.timestamp) {
+                console.log(`🔄 New sensor data detected! Previous: ${prev}, New: ${result.timestamp}. Triggering refresh...`);
+                // Trigger refresh across the entire dashboard
+                fetchSensorData(mode);
+                fetchDatabaseStats();
+                fetchFileHistory(selectedSensor);
+                fetchEvents();
+              }
+              return result.timestamp;
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Could not query latest data timestamp:', err);
+      }
+    };
+
+    // Run initial check immediately
+    checkLatestDataTimestamp();
+
+    // Poll every 5 seconds
+    const interval = setInterval(checkLatestDataTimestamp, 5000);
+    return () => clearInterval(interval);
+  }, [mode, selectedSensor]);
 
   // ======================== PHASE 2: FAULT EVENT MONITORING ========================
   // Poll fault state every 30 seconds when activeFault is selected
