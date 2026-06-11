@@ -1357,7 +1357,7 @@ function App() {
                   <div style={{ height: '80vh' }}>
                     <TimeSeriesChart
                       sensor={timeSeriesSensor}
-                      sensorData={sensorData[timeSeriesSensor] || {}}
+                      sensorData={sensorData[timeSeriesSensor]?.[mode] || {}}
                       onSensorChange={handleTimeSeriesSensorChange}
                       faultCurrentData={faultCurrentData}
                       activeFault={activeFault}
@@ -1366,7 +1366,7 @@ function App() {
                 ))}>
                   <TimeSeriesChart 
                     sensor={timeSeriesSensor} 
-                    sensorData={sensorData[timeSeriesSensor] || {}}
+                    sensorData={sensorData[timeSeriesSensor]?.[mode] || {}}
                     onSensorChange={handleTimeSeriesSensorChange}
                     faultCurrentData={faultCurrentData}
                     activeFault={activeFault}
