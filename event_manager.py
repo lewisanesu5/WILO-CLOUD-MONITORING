@@ -166,7 +166,8 @@ class EventManager:
     def _calculate_slopes_backwards(self, data_points: List[Tuple[float, float]], failure_idx: int) -> List[Dict]:
         """
         Calculate slopes BACKWARDS from the failure point to previous data.
-        This shows what LED TO the failure.
+        This shows what LED TO the failure, including the stable baseline period.
+        Extracts: all deviation points + 3 stable baseline points.
         
         Args:
             data_points: List of (timestamp, value) tuples
@@ -175,11 +176,13 @@ class EventManager:
         Returns:
             List of dicts with timestamp, value, slope, and time_delta (going backwards)
         """
-        NEGLIGIBLE_SLOPE_THRESHOLD = 0.001  # Adjust based on data characteristics
+        NEGLIGIBLE_SLOPE_THRESHOLD = 0.001  # Threshold for detecting "stable" slopes
         MAX_LOOKBACK_POINTS = 100  # Maximum number of points to track backwards
+        STABLE_POINTS_TO_CAPTURE = 3  # Number of consecutive stable points to include in baseline
         
         slope_data = []
         failure_time = data_points[failure_idx][0]
+        stable_slope_count = 0  # Track consecutive stable slopes
         
         # Start from failure and go backwards
         for i in range(failure_idx, max(-1, failure_idx - MAX_LOOKBACK_POINTS), -1):
@@ -211,49 +214,15 @@ class EventManager:
                 'time_delta': time_delta
             })
             
-            # Check if we've reached negligible slope (stable baseline before failure)
+            # Track consecutive stable slopes (baseline detection)
             if i < failure_idx and abs(slope) < NEGLIGIBLE_SLOPE_THRESHOLD:
-                # Check previous few points to confirm stability
-                all_negligible = True
-                for j in range(i - 1, max(-1, i - 5), -1):
-                    if j < 0:
-                        break
-                    curr_timestamp = data_points[j][0]
-                    curr_value = data_points[j][1]
-                    next_timestamp = data_points[j + 1][0]
-                    next_value = data_points[j + 1][1]
-                    time_diff = next_timestamp - curr_timestamp
-                    
-                    if time_diff > 0:
-                        check_slope = (next_value - curr_value) / (time_diff / 1000)
-                        if abs(check_slope) >= NEGLIGIBLE_SLOPE_THRESHOLD:
-                            all_negligible = False
-                            break
-                
-                if all_negligible:
-                    # Add a few more stable points for context
-                    for j in range(i - 1, max(-1, i - 5), -1):
-                        if j < 0:
-                            break
-                        timestamp = data_points[j][0]
-                        value = data_points[j][1]
-                        next_timestamp = data_points[j + 1][0]
-                        next_value = data_points[j + 1][1]
-                        time_diff = next_timestamp - timestamp
-                        
-                        if time_diff > 0:
-                            slope = (next_value - value) / (time_diff / 1000)
-                        else:
-                            slope = 0.0
-                        
-                        time_delta = (timestamp - failure_time) / 1000
-                        slope_data.append({
-                            'timestamp': timestamp,
-                            'value': value,
-                            'slope': slope,
-                            'time_delta': time_delta
-                        })
-                    break
+                stable_slope_count += 1
+            else:
+                stable_slope_count = 0  # Reset if deviation detected again
+            
+            # Stop once we've captured 3 consecutive stable points (stable baseline reached)
+            if stable_slope_count >= STABLE_POINTS_TO_CAPTURE:
+                break
         
         # Reverse the list so it's chronological (oldest to newest, ending at failure)
         slope_data.reverse()
