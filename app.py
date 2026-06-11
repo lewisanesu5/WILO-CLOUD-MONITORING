@@ -1093,19 +1093,16 @@ def get_sensor_data():
         # Get sensor data with both raw CSV data and database statistics
         sensor_data = get_sensor_data_with_raw_data(mode)
         
-        # Filter data for requested mode
-        filtered_data = {}
-        for sensor_name, modes in sensor_data.items():
-            if mode in modes:
-                filtered_data[sensor_name] = modes[mode]
-        
+        # Return the full nested structure {sensor: {max: {...}, min: {...}, combined: {...}}}
+        # so the frontend can access sensorData[sensor][mode].raw_values correctly.
+        # We still include all modes so the frontend can switch modes without re-fetching.
         api_time = time.time() - api_start
         logger.info(f"🚀 /api/sensor-data ({mode}) response time: {api_time*1000:.1f}ms")
         
         return jsonify({
             'status': 'success',
             'mode': mode,
-            'data': filtered_data,
+            'data': sensor_data,
             'timestamp': dt.datetime.now().isoformat(),
             'response_time_ms': round(api_time * 1000, 2)
         })

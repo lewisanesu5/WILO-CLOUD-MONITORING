@@ -1401,7 +1401,7 @@ function App() {
                     <div style={{ height: '80vh' }}>
                       <StatisticalAnalysisChart
                         sensor={timeSeriesSensor}
-                        sensorData={sensorData[timeSeriesSensor] || {}}
+                        sensorData={sensorData[timeSeriesSensor]?.[mode] || {}}
                         selectedParam={selectedParam}
                         historicalStats={historicalStats}
                         faultTrendData={faultTrendData}
@@ -1411,7 +1411,7 @@ function App() {
                   ))} className="relative min-h-[320px]">
                     <StatisticalAnalysisChart
                       sensor={timeSeriesSensor}
-                      sensorData={sensorData[timeSeriesSensor] || {}}
+                      sensorData={sensorData[timeSeriesSensor]?.[mode] || {}}
                       selectedParam={selectedParam}
                       historicalStats={historicalStats}
                       faultTrendData={faultTrendData}
