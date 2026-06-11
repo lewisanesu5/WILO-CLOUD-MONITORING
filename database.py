@@ -578,3 +578,106 @@ def insert_event_from_historical_data(failure_type, extracted_data):
     finally:
         if conn:
             conn.close()
+
+
+# ==================== RAW DATAPOINTS STORAGE FUNCTIONS ====================
+
+def save_raw_datapoints(sensor_name, batch, timestamp_ms, datapoints, datapoint_timestamps):
+    """
+    Save raw datapoints and their timestamps to Neon database.
+    
+    Args:
+        sensor_name: 'acceleration', 'current', or 'audio'
+        batch: 'max', 'min', or 'combined'
+        timestamp_ms: numeric timestamp (ms) for the batch primary timestamp
+        datapoints: List or numpy array of float values
+        datapoint_timestamps: List or numpy array of bigint timestamps (milliseconds)
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        table_name = f"{sensor_name.lower()}_datapoints"
+        
+        # Validate table name to prevent SQL injection
+        valid_tables = ['acceleration_datapoints', 'current_datapoints', 'audio_datapoints']
+        if table_name not in valid_tables:
+            raise ValueError(f"Invalid sensor table: {table_name}")
+            
+        # Ensure native Python lists of appropriate types
+        if hasattr(datapoints, 'tolist'):
+            datapoints_list = datapoints.tolist()
+        else:
+            datapoints_list = [float(x) for x in datapoints]
+            
+        if hasattr(datapoint_timestamps, 'tolist'):
+            timestamps_list = datapoint_timestamps.tolist()
+        else:
+            timestamps_list = [int(x) for x in datapoint_timestamps]
+            
+        # Convert timestamp_ms to datetime object with timezone info
+        if timestamp_ms > 1e11:
+            timestamp_dt = datetime.fromtimestamp(timestamp_ms / 1000)
+        else:
+            timestamp_dt = datetime.fromtimestamp(timestamp_ms)
+            
+        query = f"""
+            INSERT INTO {table_name} (timestamp, batch, datapoints, datapoint_timestamps)
+            VALUES (%s, %s, %s, %s)
+        """
+        
+        cur.execute(query, (timestamp_dt, batch, datapoints_list, timestamps_list))
+        conn.commit()
+        logger.info(f"✓ Saved raw datapoints for {sensor_name} ({batch})")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving raw datapoints for {sensor_name} ({batch}): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def get_latest_raw_datapoints(sensor_name, batch='max'):
+    """
+    Retrieve the latest raw datapoints for a sensor and batch type.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        table_name = f"{sensor_name.lower()}_datapoints"
+        valid_tables = ['acceleration_datapoints', 'current_datapoints', 'audio_datapoints']
+        if table_name not in valid_tables:
+            raise ValueError(f"Invalid sensor table: {table_name}")
+            
+        query = f"""
+            SELECT timestamp, batch, datapoints, datapoint_timestamps
+            FROM {table_name}
+            WHERE batch = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """
+        
+        cur.execute(query, (batch,))
+        row = cur.fetchone()
+        
+        if row:
+            row_dict = dict(row)
+            return {
+                'timestamp': row_dict['timestamp'].isoformat() if row_dict['timestamp'] else None,
+                'batch': row_dict['batch'],
+                'datapoints': list(row_dict['datapoints']),
+                'datapoint_timestamps': [int(t) for t in row_dict['datapoint_timestamps']]
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Error retrieving raw datapoints for {sensor_name} ({batch}): {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+

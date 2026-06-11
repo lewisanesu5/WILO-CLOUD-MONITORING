@@ -18,7 +18,11 @@ import time
 import multiprocessing
 import threading
 from dotenv import load_dotenv
-from database import save_statistics, test_connection, get_all_latest_statistics_by_mode, get_connection, insert_event_from_historical_data
+from database import (
+    save_statistics, test_connection, get_all_latest_statistics_by_mode, 
+    get_connection, insert_event_from_historical_data, save_raw_datapoints,
+    get_latest_raw_datapoints
+)
 from psycopg2.extras import RealDictCursor
 from event_manager import EventManager
 
@@ -778,21 +782,40 @@ def get_latest_statistics_for_mode(sensor_name, mode):
 def get_sensor_data_with_raw_data(mode='max'):
     """
     Get sensor data combining:
-    - Raw CSV data (timestamps, values) for time-series charts
+    - Raw data (timestamps, values) fetched from Neon database (primary) or local CSV (fallback)
     - Calculated statistics from database
-    
-    This hybrid approach:
-    - Keeps CSV loading for visualization
-    - Gets pre-calculated stats from DB (efficient)
     """
     sensor_data = {}
     
     for sensor in SENSORS:
         sensor_data[sensor] = {}
         
-        # Load raw data from CSV files for time-series display
-        max_timestamps, max_values, max_file_ts = load_csv_data(f"max_{sensor}.csv")
-        min_timestamps, min_values, min_file_ts = load_csv_data(f"min_{sensor}.csv")
+        # 1. Try to load raw data from database first
+        max_db_raw = get_latest_raw_datapoints(sensor, 'max')
+        if max_db_raw:
+            max_values = max_db_raw['datapoints']
+            max_timestamps = max_db_raw['datapoint_timestamps']
+            max_file_ts = max_db_raw['timestamp']
+        else:
+            max_timestamps, max_values, max_file_ts = load_csv_data(f"max_{sensor}.csv")
+            
+        min_db_raw = get_latest_raw_datapoints(sensor, 'min')
+        if min_db_raw:
+            min_values = min_db_raw['datapoints']
+            min_timestamps = min_db_raw['datapoint_timestamps']
+            min_file_ts = min_db_raw['timestamp']
+        else:
+            min_timestamps, min_values, min_file_ts = load_csv_data(f"min_{sensor}.csv")
+            
+        combined_db_raw = get_latest_raw_datapoints(sensor, 'combined')
+        if combined_db_raw:
+            combined_values_db = combined_db_raw['datapoints']
+            combined_timestamps_db = combined_db_raw['datapoint_timestamps']
+            combined_file_ts_db = combined_db_raw['timestamp']
+        else:
+            combined_values_db = None
+            combined_timestamps_db = None
+            combined_file_ts_db = None
         
         # Get stats from database instead of calculating
         try:
@@ -852,7 +875,22 @@ def get_sensor_data_with_raw_data(mode='max'):
             }
         
         # --- COMBINED MODE ---
-        if max_values and min_values:
+        if combined_values_db is not None:
+            combined_stats = extract_stats_from_db_row(combined_stats_row) if combined_stats_row else calculate_statistics(combined_values_db)
+            combined_frequencies, combined_amplitudes = extract_fft_from_db_row(combined_stats_row) if combined_stats_row else calculate_fft_analysis(combined_values_db)
+            combined_health = get_sensor_health_status(combined_stats)
+            
+            sensor_data[sensor]['combined'] = {
+                'stats': combined_stats,
+                'frequencies': combined_frequencies,
+                'amplitudes': combined_amplitudes,
+                'health': combined_health,
+                'data_points': len(combined_values_db),
+                'raw_timestamps': combined_timestamps_db,
+                'raw_values': combined_values_db,
+                'file_timestamp': combined_file_ts_db
+            }
+        elif max_values and min_values:
             merged_timestamps, merged_values = merge_max_min_files(max_timestamps, max_values, min_timestamps, min_values)
             combined_stats = extract_stats_from_db_row(combined_stats_row) if combined_stats_row else calculate_statistics(merged_values)
             combined_frequencies, combined_amplitudes = extract_fft_from_db_row(combined_stats_row) if combined_stats_row else calculate_fft_analysis(merged_values)
@@ -925,13 +963,14 @@ def load_all_sensor_data_with_modes():
                 'file_timestamp': max_file_ts
             }
             
-            # Save MAX statistics to database
+            # Save MAX statistics and raw datapoints to database
             try:
                 save_start = time.time()
                 save_statistics(sensor, 'max', max_stats, max_frequencies, max_amplitudes)
+                save_raw_datapoints(sensor, 'max', max_timestamps[0] if max_timestamps else time.time() * 1000, max_values, max_timestamps)
                 save_times['max'] += time.time() - save_start
             except Exception as e:
-                logger.error(f"Failed to save {sensor} (max) statistics to database: {e}")
+                logger.error(f"Failed to save {sensor} (max) statistics/datapoints to database: {e}")
         else:
             sensor_data[sensor]['max'] = {
                 'stats': {}, 'frequencies': [], 'amplitudes': [],
@@ -959,13 +998,14 @@ def load_all_sensor_data_with_modes():
                 'file_timestamp': min_file_ts
             }
             
-            # Save MIN statistics to database
+            # Save MIN statistics and raw datapoints to database
             try:
                 save_start = time.time()
                 save_statistics(sensor, 'min', min_stats, min_frequencies, min_amplitudes)
+                save_raw_datapoints(sensor, 'min', min_timestamps[0] if min_timestamps else time.time() * 1000, min_values, min_timestamps)
                 save_times['min'] += time.time() - save_start
             except Exception as e:
-                logger.error(f"Failed to save {sensor} (min) statistics to database: {e}")
+                logger.error(f"Failed to save {sensor} (min) statistics/datapoints to database: {e}")
         else:
             sensor_data[sensor]['min'] = {
                 'stats': {}, 'frequencies': [], 'amplitudes': [],
@@ -995,7 +1035,7 @@ def load_all_sensor_data_with_modes():
                     combined_file_ts = max_file_ts or min_file_ts
             except Exception:
                 combined_file_ts = max_file_ts or min_file_ts
-
+ 
             sensor_data[sensor]['combined'] = {
                 'stats': combined_stats,
                 'frequencies': combined_frequencies,
@@ -1009,13 +1049,14 @@ def load_all_sensor_data_with_modes():
                 'file_timestamp': combined_file_ts
             }
             
-            # Save COMBINED statistics to database
+            # Save COMBINED statistics and raw datapoints to database
             try:
                 save_start = time.time()
                 save_statistics(sensor, 'combined', combined_stats, combined_frequencies, combined_amplitudes)
+                save_raw_datapoints(sensor, 'combined', merged_timestamps[0] if merged_timestamps else time.time() * 1000, merged_values, merged_timestamps)
                 save_times['combined'] += time.time() - save_start
             except Exception as e:
-                logger.error(f"Failed to save {sensor} (combined) statistics to database: {e}")
+                logger.error(f"Failed to save {sensor} (combined) statistics/datapoints to database: {e}")
         else:
             sensor_data[sensor]['combined'] = {
                 'stats': {}, 'frequencies': [], 'amplitudes': [],
@@ -1263,20 +1304,30 @@ def process_uploaded_csv_and_save_to_db(uploaded_files):
             # Process MAX mode
             if sensor in files_by_mode['max']:
                 max_values = files_by_mode['max'][sensor]['values']
+                max_timestamps = files_by_mode['max'][sensor]['timestamps']
                 max_stats = calculate_statistics(max_values)
                 max_frequencies, max_amplitudes = calculate_fft_analysis(max_values)
+                
+                # Save statistics and raw datapoints
                 save_statistics(sensor, 'max', max_stats, max_frequencies, max_amplitudes)
+                save_raw_datapoints(sensor, 'max', max_timestamps[0] if max_timestamps else time.time() * 1000, max_values, max_timestamps)
+                
                 results['max'][sensor] = True
-                logger.info(f"✓ Saved MAX statistics for {sensor}")
+                logger.info(f"✓ Saved MAX statistics and raw datapoints for {sensor}")
             
             # Process MIN mode
             if sensor in files_by_mode['min']:
                 min_values = files_by_mode['min'][sensor]['values']
+                min_timestamps = files_by_mode['min'][sensor]['timestamps']
                 min_stats = calculate_statistics(min_values)
                 min_frequencies, min_amplitudes = calculate_fft_analysis(min_values)
+                
+                # Save statistics and raw datapoints
                 save_statistics(sensor, 'min', min_stats, min_frequencies, min_amplitudes)
+                save_raw_datapoints(sensor, 'min', min_timestamps[0] if min_timestamps else time.time() * 1000, min_values, min_timestamps)
+                
                 results['min'][sensor] = True
-                logger.info(f"✓ Saved MIN statistics for {sensor}")
+                logger.info(f"✓ Saved MIN statistics and raw datapoints for {sensor}")
             
             # Process COMBINED mode (merge max + min)
             if sensor in files_by_mode['max'] and sensor in files_by_mode['min']:
@@ -1289,9 +1340,13 @@ def process_uploaded_csv_and_save_to_db(uploaded_files):
                 if merged_vals:
                     combined_stats = calculate_statistics(merged_vals)
                     combined_frequencies, combined_amplitudes = calculate_fft_analysis(merged_vals)
+                    
+                    # Save statistics and raw datapoints
                     save_statistics(sensor, 'combined', combined_stats, combined_frequencies, combined_amplitudes)
+                    save_raw_datapoints(sensor, 'combined', merged_ts[0] if merged_ts else time.time() * 1000, merged_vals, merged_ts)
+                    
                     results['combined'][sensor] = True
-                    logger.info(f"✓ Saved COMBINED statistics for {sensor}")
+                    logger.info(f"✓ Saved COMBINED statistics and raw datapoints for {sensor}")
     except Exception as e:
         logger.error(f"Error saving statistics to database: {e}")
         raise
@@ -1684,7 +1739,7 @@ def db_diagnostic():
         
         # Get record counts for sensor tables
         record_counts = {}
-        for table in ['acceleration', 'current', 'audio']:
+        for table in ['acceleration', 'current', 'audio', 'acceleration_datapoints', 'current_datapoints', 'audio_datapoints']:
             try:
                 cur.execute(f"SELECT COUNT(*) FROM {table}")
                 count = cur.fetchone()[0]
@@ -1694,7 +1749,7 @@ def db_diagnostic():
         
         # Get sample data from each table
         samples = {}
-        for table in ['acceleration', 'current', 'audio']:
+        for table in ['acceleration', 'current', 'audio', 'acceleration_datapoints', 'current_datapoints', 'audio_datapoints']:
             try:
                 cur.execute(f"SELECT * FROM {table} LIMIT 1")
                 row = cur.fetchone()
