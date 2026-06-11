@@ -11,7 +11,7 @@ import datetime
 import numpy as np
 from scipy import stats as sp_stats
 from typing import Dict, List, Tuple, Optional
-from database import insert_event_data_to_database
+from database import insert_event_data
 
 
 def calculate_statistics(z_values):
@@ -305,7 +305,7 @@ class EventManager:
 
         # ==================== INSERT TO NEON DATABASE ====================
         try:
-            db_result = insert_event_data_to_database(event_name, slope_data, event_statistics)
+            db_result = insert_event_data(event_name, slope_data, event_statistics, sensor_type='acceleration')
             fault_id = db_result['fault_id']
             rows_inserted = db_result['rows_inserted']
             
