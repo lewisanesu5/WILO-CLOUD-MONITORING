@@ -348,8 +348,9 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
                 extracted_counts[sensor_name] = len(extracted_data)
                 logger.info(f"✂️ {sensor_name}: extracting {len(extracted_data)} records (indices {start_idx}-{end_idx})")
                 
-                # Collect all extracted data for database insertion
-                all_extracted_data.extend(extracted_data)
+                # Collect all extracted data for database insertion — tag with sensor identity
+                tagged_data = [{**dp, 'sensor_type': sensor_name} for dp in extracted_data]
+                all_extracted_data.extend(tagged_data)
                 
                 # Generate CSV content in memory
                 logger.info(f"📝 Generating CSV for {sensor_name}")

@@ -296,6 +296,8 @@ def create_event_table_if_not_exists(table_name):
             CREATE TABLE IF NOT EXISTS {table_name} (
                 {table_name}_id SERIAL PRIMARY KEY,
                 fault_id INTEGER NOT NULL,
+                sensor_type VARCHAR(20) NOT NULL DEFAULT 'acceleration'
+                    CHECK (sensor_type IN ('acceleration', 'current', 'audio')),
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 x_min FLOAT,
                 x_max FLOAT,
@@ -382,15 +384,17 @@ def get_next_fault_id(failure_type):
             conn.close()
 
 
-def insert_event_data_to_database(failure_type, slope_data, event_statistics):
+def insert_event_data(failure_type, slope_data, event_statistics, sensor_type='acceleration'):
     """
-    Insert event data into the appropriate failure-specific table in Neon.
+    Insert event data into the appropriate failure table in Neon.
+    Used when real-time fault monitoring generates slope data.
     
     Args:
         failure_type: Name of the failure (e.g., "Motor Stall")
         slope_data: List of dicts with keys: timestamp, value, slope, time_delta
-        event_statistics: Dict with keys: min, max, mean, std_dev, range, variance, 
+        event_statistics: Dict with keys: min, max, mean, std_dev, range, variance,
                          skewness, kurtosis, frequency1-5, amplitude1-5
+        sensor_type: 'acceleration', 'current', or 'audio' (default: 'acceleration')
         
     Returns:
         Dict with fault_id, rows_inserted, and table name
@@ -411,13 +415,14 @@ def insert_event_data_to_database(failure_type, slope_data, event_statistics):
         conn = get_connection()
         cur = conn.cursor()
         
-        # Prepare insert query
+        # Prepare insert query — includes sensor_type
         query = f"""
             INSERT INTO {table_name}
-            (fault_id, timestamp, x_min, x_max, mean, standard_deviation, range, variance,
-             skewness, kurtosis, frequency1, frequency2, frequency3, frequency4, frequency5,
+            (fault_id, sensor_type, timestamp, x_min, x_max, mean, standard_deviation,
+             range, variance, skewness, kurtosis,
+             frequency1, frequency2, frequency3, frequency4, frequency5,
              amplitude1, amplitude2, amplitude3, amplitude4, amplitude5)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         # Insert each data point
@@ -428,6 +433,7 @@ def insert_event_data_to_database(failure_type, slope_data, event_statistics):
                 
                 cur.execute(query, (
                     fault_id,                                           # fault_id
+                    sensor_type,                                        # sensor_type
                     timestamp_dt,                                       # timestamp
                     event_statistics.get('min', 0),                    # x_min
                     event_statistics.get('max', 0),                    # x_max
@@ -459,7 +465,7 @@ def insert_event_data_to_database(failure_type, slope_data, event_statistics):
         
         logger.info(
             f"✓ Event saved to database: "
-            f"Table={table_name}, fault_id={fault_id}, rows={rows_inserted}"
+            f"Table={table_name}, fault_id={fault_id}, sensor={sensor_type}, rows={rows_inserted}"
         )
         
         return {
@@ -483,10 +489,12 @@ def insert_event_from_historical_data(failure_type, extracted_data):
     """
     Insert event data from historical extraction into the appropriate failure table in Neon.
     Used when creating events from existing historical database records.
+    Each data_point dict must contain a 'sensor_type' key ('acceleration', 'current', or 'audio')
+    so rows are correctly labelled by sensor.
     
     Args:
         failure_type: Name of the failure (e.g., "Motor Stall")
-        extracted_data: List of dicts with historical stat columns
+        extracted_data: List of dicts with historical stat columns + 'sensor_type'
         
     Returns:
         Dict with fault_id, rows_inserted, and table name
@@ -507,13 +515,14 @@ def insert_event_from_historical_data(failure_type, extracted_data):
         conn = get_connection()
         cur = conn.cursor()
         
-        # Prepare insert query
+        # Prepare insert query — includes sensor_type
         query = f"""
             INSERT INTO {table_name}
-            (fault_id, timestamp, x_min, x_max, mean, standard_deviation, range, variance,
-             skewness, kurtosis, frequency1, frequency2, frequency3, frequency4, frequency5,
+            (fault_id, sensor_type, timestamp, x_min, x_max, mean, standard_deviation,
+             range, variance, skewness, kurtosis,
+             frequency1, frequency2, frequency3, frequency4, frequency5,
              amplitude1, amplitude2, amplitude3, amplitude4, amplitude5)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         # Insert each historical data point with the new fault_id
@@ -527,8 +536,12 @@ def insert_event_from_historical_data(failure_type, extracted_data):
                     except:
                         timestamp_val = datetime.now()
                 
+                # Determine sensor_type from the data point (tagged in app.py)
+                sensor_type = data_point.get('sensor_type', 'acceleration')
+                
                 cur.execute(query, (
                     fault_id,                                           # fault_id
+                    sensor_type,                                        # sensor_type
                     timestamp_val,                                      # timestamp
                     data_point.get('min', 0),                          # x_min
                     data_point.get('max', 0),                          # x_max
