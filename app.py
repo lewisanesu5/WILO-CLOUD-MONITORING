@@ -43,9 +43,9 @@ ALLOWED_ORIGINS = [
 
 # Configure CORS with explicit options
 CORS(app, 
-     origins=ALLOWED_ORIGINS,
+     origins="*",
      methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-     allow_headers=['Content-Type', 'Authorization'],
+     allow_headers=['Content-Type', 'Authorization', 'X-API-Key'],
      supports_credentials=False,
      max_age=3600)
 
