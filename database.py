@@ -384,23 +384,21 @@ def get_next_fault_id(failure_type):
             conn.close()
 
 
-def insert_event_data(failure_type, slope_data, event_statistics, sensor_type='acceleration'):
+def insert_event_data(failure_type, multi_sensor_trends):
     """
-    Insert event data into the appropriate failure table in Neon.
-    Used when real-time fault monitoring generates slope data.
+    Insert multi-sensor event data into the appropriate failure table in Neon.
     
     Args:
         failure_type: Name of the failure (e.g., "Motor Stall")
-        slope_data: List of dicts with keys: timestamp, value, slope, time_delta
-        event_statistics: Dict with keys: min, max, mean, std_dev, range, variance,
-                         skewness, kurtosis, frequency1-5, amplitude1-5
-        sensor_type: 'acceleration', 'current', or 'audio' (default: 'acceleration')
-        
+        multi_sensor_trends: Dict with keys 'acceleration', 'current', 'audio'
+                            Each contains list of dicts with trend data and aggregated features
+    
     Returns:
-        Dict with fault_id, rows_inserted, and table name
+        Dict with fault_id, total_rows_inserted, and rows_per_sensor
     """
     conn = None
-    rows_inserted = 0
+    total_rows_inserted = 0
+    rows_per_sensor = {}
     fault_id = None
     
     try:
@@ -415,7 +413,7 @@ def insert_event_data(failure_type, slope_data, event_statistics, sensor_type='a
         conn = get_connection()
         cur = conn.cursor()
         
-        # Prepare insert query — includes sensor_type
+        # Prepare insert query
         query = f"""
             INSERT INTO {table_name}
             (fault_id, sensor_type, timestamp, x_min, x_max, mean, standard_deviation,
@@ -425,58 +423,76 @@ def insert_event_data(failure_type, slope_data, event_statistics, sensor_type='a
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
-        # Insert each data point
-        for point in slope_data:
-            try:
-                # Convert timestamp (milliseconds) to datetime
-                timestamp_dt = datetime.fromtimestamp(point['timestamp'] / 1000)
-                
-                cur.execute(query, (
-                    fault_id,                                           # fault_id
-                    sensor_type,                                        # sensor_type
-                    timestamp_dt,                                       # timestamp
-                    event_statistics.get('min', 0),                    # x_min
-                    event_statistics.get('max', 0),                    # x_max
-                    event_statistics.get('mean', 0),                   # mean
-                    event_statistics.get('std_dev', 0),                # standard_deviation
-                    event_statistics.get('range', 0),                  # range
-                    event_statistics.get('variance', 0),               # variance
-                    event_statistics.get('skewness', 0),               # skewness
-                    event_statistics.get('kurtosis', 0),               # kurtosis
-                    event_statistics.get('frequency1', 0),             # frequency1
-                    event_statistics.get('frequency2', 0),             # frequency2
-                    event_statistics.get('frequency3', 0),             # frequency3
-                    event_statistics.get('frequency4', 0),             # frequency4
-                    event_statistics.get('frequency5', 0),             # frequency5
-                    event_statistics.get('amplitude1', 0),             # amplitude1
-                    event_statistics.get('amplitude2', 0),             # amplitude2
-                    event_statistics.get('amplitude3', 0),             # amplitude3
-                    event_statistics.get('amplitude4', 0),             # amplitude4
-                    event_statistics.get('amplitude5', 0)              # amplitude5
-                ))
-                rows_inserted += 1
-                
-            except Exception as e:
-                logger.error(f"Error inserting row for {failure_type}: {e}")
-                raise
+        # Process each sensor's data
+        for sensor_type, trend_data in multi_sensor_trends.items():
+            sensor_rows = 0
+            
+            for point in trend_data:
+                try:
+                    # Convert timestamp (milliseconds) to datetime
+                    timestamp_dt = datetime.fromtimestamp(point['timestamp'] / 1000)
+                    
+                    # Calculate statistics for this point across the feature set
+                    # Use the aggregated features from the point data
+                    feature_values = [
+                        point.get('mean', 0),
+                        point.get('max', 0),
+                        point.get('min', 0),
+                        point.get('std_dev', 0),
+                        point.get('kurtosis', 0)
+                    ]
+                    
+                    cur.execute(query, (
+                        fault_id,                              # fault_id
+                        sensor_type,                           # sensor_type
+                        timestamp_dt,                          # timestamp
+                        point.get('min', 0),                   # x_min
+                        point.get('max', 0),                   # x_max
+                        point.get('mean', 0),                  # mean
+                        point.get('std_dev', 0),               # standard_deviation
+                        point.get('max', 0) - point.get('min', 0),  # range
+                        point.get('variance', 0),              # variance
+                        point.get('skewness', 0),              # skewness
+                        point.get('kurtosis', 0),              # kurtosis
+                        0,  # frequency1 (aggregated features don't have FFT)
+                        0,  # frequency2
+                        0,  # frequency3
+                        0,  # frequency4
+                        0,  # frequency5
+                        0,  # amplitude1
+                        0,  # amplitude2
+                        0,  # amplitude3
+                        0,  # amplitude4
+                        0   # amplitude5
+                    ))
+                    sensor_rows += 1
+                    total_rows_inserted += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error inserting row for {failure_type}/{sensor_type}: {e}")
+                    raise
+            
+            rows_per_sensor[sensor_type] = sensor_rows
         
         # Commit all inserts
         conn.commit()
         
         logger.info(
-            f"✓ Event saved to database: "
-            f"Table={table_name}, fault_id={fault_id}, sensor={sensor_type}, rows={rows_inserted}"
+            f"✓ Multi-sensor event saved to database: "
+            f"Table={table_name}, fault_id={fault_id}, total_rows={total_rows_inserted}, "
+            f"sensors={list(rows_per_sensor.keys())}"
         )
         
         return {
             'success': True,
             'fault_id': fault_id,
-            'rows_inserted': rows_inserted,
+            'total_rows_inserted': total_rows_inserted,
+            'rows_per_sensor': rows_per_sensor,
             'table_name': table_name
         }
         
     except Exception as e:
-        logger.error(f"Error inserting event data for {failure_type}: {e}")
+        logger.error(f"Error inserting multi-sensor event data for {failure_type}: {e}")
         if conn:
             conn.rollback()
         raise
