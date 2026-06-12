@@ -155,13 +155,13 @@ def get_historical_statistics(limit=100):
             try:
                 query = f"""
                     SELECT 
-                        x_min, x_max, mean, standard_deviation, skewness, kurtosis,
+                        x_min, x_max, mean, standard_deviation, range, variance, skewness, kurtosis,
                         frequency1, frequency2, frequency3, frequency4, frequency5,
                         amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
                         created_at, file_type
                     FROM {sensor}
                     WHERE file_type = 'max'
-                    ORDER BY created_at ASC
+                    ORDER BY created_at DESC
                     LIMIT %s
                 """
                 cur.execute(query, (limit,))
@@ -174,6 +174,8 @@ def get_historical_statistics(limit=100):
                     'max': row['x_max'],
                     'mean': row['mean'],
                     'std_dev': row['standard_deviation'],
+                    'range': row.get('range'),
+                    'variance': row.get('variance'),
                     'skewness': row['skewness'],
                     'kurtosis': row['kurtosis'],
                     'frequency1': row.get('frequency1'),
@@ -190,6 +192,8 @@ def get_historical_statistics(limit=100):
                 } for row in rows]
             except Exception as sensor_error:
                 logger.error(f"✗ Error fetching {sensor} data: {sensor_error}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 result[sensor] = []
         
         # Log total records fetched

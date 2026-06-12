@@ -180,16 +180,16 @@ class EventManager:
             
             for sensor_type, table_name in table_names.items():
                 try:
-                    # Query last 24 hours of data, ordered by created_at ascending
+                    # Query last 24 hours of MAX file_type data, ordered by created_at ASC (chronological)
                     query = f"""
                         SELECT 
                             x_min, x_max, mean, standard_deviation, range,
                             variance, skewness, kurtosis,
                             frequency1, frequency2, frequency3, frequency4, frequency5,
                             amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
-                            created_at
+                            created_at, file_type
                         FROM {table_name}
-                        WHERE created_at >= %s
+                        WHERE created_at >= %s AND file_type = 'max'
                         ORDER BY created_at ASC
                     """
                     
