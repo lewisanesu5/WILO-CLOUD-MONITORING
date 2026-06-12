@@ -339,19 +339,10 @@ class EventManager:
     
     def _extract_multi_sensor_trends(self, sensor_data: Dict) -> Dict[str, List[Dict]]:
         """
-        Extract trend data for all sensors based on unified stability detection.
-        Uses ALL statistical features (mean, max, min, std_dev, variance, skewness, kurtosis)
-        for comprehensive fault signature analysis.
-        
-        Args:
-            sensor_data: Dict with 'acceleration', 'current', 'audio' data
-            
-        Returns:
-            Dict with extracted trends for each sensor
+        Extract trend data for all sensors.
+        Dynamically detects when a statistical feature first starts to deviate from its normal baseline.
+        Extracts exactly 3 normal baseline points followed by the deviation ramp leading to failure.
         """
-        NEGLIGIBLE_SLOPE_THRESHOLD = 0.001
-        STABLE_POINTS_TO_CAPTURE = 3
-        # All features to use for stability detection and extraction
         ALL_FEATURES = ['mean', 'max', 'min', 'std_dev', 'variance', 'skewness', 'kurtosis']
         
         # Assume all sensors have same timestamps; use acceleration as reference
@@ -362,43 +353,62 @@ class EventManager:
         failure_idx = len(accel_data) - 1
         failure_time = accel_data[failure_idx]['timestamp']
         
-        # Track stability across ALL sensors
-        stable_slope_count = 0
-        extraction_started = False
-        start_idx = failure_idx
-        
-        # Find extraction window by looking backwards for stability
-        for i in range(failure_idx, max(-1, failure_idx - 100), -1):
-            all_slopes = []
-            
-            # Check slopes for ALL features of all sensors
+        # Calculate normal baseline stats (mean & standard deviation) for each sensor and feature
+        # using the first 5 records of the dataset.
+        baseline_size = min(5, len(accel_data))
+        baselines = {}
+        for sensor_type in ['acceleration', 'current', 'audio']:
+            if sensor_type not in sensor_data or not sensor_data[sensor_type]:
+                continue
+            sensor_points = sensor_data[sensor_type]
+            baselines[sensor_type] = {}
+            for feature in ALL_FEATURES:
+                vals = [p.get(feature, 0.0) for p in sensor_points[:baseline_size] if p.get(feature) is not None]
+                if vals:
+                    mean_val = np.mean(vals)
+                    std_val = np.std(vals)
+                else:
+                    mean_val = 0.0
+                    std_val = 0.0
+                baselines[sensor_type][feature] = (mean_val, std_val)
+
+        # Detect the first index 'd' where any statistical feature starts behaving abnormally.
+        deviation_idx = None
+        for i in range(baseline_size, len(accel_data)):
             for sensor_type in ['acceleration', 'current', 'audio']:
                 if sensor_type not in sensor_data or i >= len(sensor_data[sensor_type]):
                     continue
-                
-                if i == failure_idx:
-                    continue  # Skip failure point itself
-                
-                sensor_points = sensor_data[sensor_type]
-                if i + 1 < len(sensor_points):
-                    for feature in ALL_FEATURES:
-                        time_diff = sensor_points[i + 1]['timestamp'] - sensor_points[i]['timestamp']
-                        value_diff = sensor_points[i + 1][feature] - sensor_points[i][feature]
-                        
-                        if time_diff > 0:
-                            slope = value_diff / (time_diff / 1000)
-                            all_slopes.append(abs(slope))
-            
-            # Check if ALL slopes are negligible (stable)
-            if all_slopes and all(slope < NEGLIGIBLE_SLOPE_THRESHOLD for slope in all_slopes):
-                stable_slope_count += 1
-            else:
-                stable_slope_count = 0
-            
-            if stable_slope_count >= STABLE_POINTS_TO_CAPTURE:
-                start_idx = i
+                point = sensor_data[sensor_type][i]
+                for feature in ALL_FEATURES:
+                    val = point.get(feature)
+                    if val is None:
+                        continue
+                    b_mean, b_std = baselines[sensor_type].get(feature, (0.0, 0.0))
+                    
+                    # Establish an adaptive threshold (min 0.05 or 5% of baseline value to avoid noise triggering)
+                    threshold = max(3.0 * b_std, 0.05 * abs(b_mean), 0.05)
+                    
+                    if abs(val - b_mean) > threshold:
+                        deviation_idx = i
+                        break
+                if deviation_idx is not None:
+                    break
+            if deviation_idx is not None:
                 break
-        
+                
+        # Set start_idx: exactly 3 normal points before the deviation point
+        if deviation_idx is not None:
+            start_idx = max(0, deviation_idx - 3)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"🎯 Deviation detected at index {deviation_idx} ({datetime.datetime.fromtimestamp(accel_data[deviation_idx]['timestamp']/1000).isoformat()}). Setting start_idx to {start_idx} (3 normal points before).")
+        else:
+            # Fallback if no deviation detected: capture last 10 points
+            start_idx = max(0, failure_idx - 10)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"⚠️ No deviation detected. Defaulting start_idx to {start_idx}.")
+
         # Extract trends for each sensor from start_idx to failure_idx
         trends = {}
         for sensor_type in ['acceleration', 'current', 'audio']:
