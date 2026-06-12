@@ -249,51 +249,59 @@ def detect_fault_deviation(sensor_data, window_size=5):
 
 def create_fault_event_csv(fault_name, num_intervals_before=3):
     """
-    Extract historical trend data and generate CSV content for each sensor.
-    Creates files in Data/{FaultName}/{timestamp}/ folder structure.
-    Timestamp is extracted from the first database record timestamp.
+    Extract historical trend data using multi-sensor approach.
+    Uses EventManager.create_event() for unified multi-sensor trend extraction
+    from database tables (acceleration, current, audio).
     
     Args:
         fault_name: Name of the fault (e.g., "Motor Stall")
-        num_intervals_before: Number of intervals to include before deviation point
+        num_intervals_before: Number of intervals before deviation point (kept for API compatibility)
     
     Returns:
-        Dict with creation status, CSV data, file paths, and metadata
+        Dict with 'success', 'intervals_extracted', 'fault_id', 'rows_inserted', etc.
     """
     try:
-        logger.info(f"🔄 START: Creating event for fault: {fault_name}")
+        from event_manager import EventManager
+        from datetime import datetime as dt_now
         
-        # Fetch historical data from database
-        logger.info(f"🗄️ Fetching historical data for fault: {fault_name}")
-        historical_data = get_historical_statistics(limit=100)
-        logger.info(f"📊 Historical data fetched")
+        logger.info(f"🔄 START: Creating multi-sensor event for fault: {fault_name}")
         
-        # Check if we have any data
-        data_counts = {k: len(v) for k, v in historical_data.items()}
-        logger.info(f"📈 Data counts - acceleration: {data_counts['acceleration']}, current: {data_counts['current']}, audio: {data_counts['audio']}")
+        # Initialize EventManager with Events and Data directories
+        event_manager_inst = EventManager('Events', 'Data')
         
-        if not any(historical_data.values()):
-            error_msg = f'No historical data available in database. Records: acceleration={data_counts["acceleration"]}, current={data_counts["current"]}, audio={data_counts["audio"]}'
-            logger.warning(f"⚠️ {error_msg}")
+        # Use current time as failure time
+        failure_time = dt_now.now()
+        failure_time_iso = failure_time.isoformat()
+        
+        logger.info(f"📊 Extracting multi-sensor trends using database tables (24-hour lookback)...")
+        logger.info(f"🎯 Failure time: {failure_time_iso}")
+        
+        # Create event using multi-sensor extraction - queries database directly
+        event_result = event_manager_inst.create_event(
+            event_name=fault_name,
+            failure_time_iso=failure_time_iso,
+            description=f"Multi-sensor event: {fault_name}"
+        )
+        
+        if not event_result.get('success'):
+            error_msg = event_result.get('error', 'Unknown error in event creation')
+            logger.error(f"❌ Multi-sensor event creation failed: {error_msg}")
             return {
                 'success': False,
                 'error': error_msg
             }
         
-        # Extract timestamp from first available record
-        timestamp_str = None
-        for sensor_name in ['acceleration', 'current', 'audio']:
-            sensor_data = historical_data.get(sensor_name, [])
-            if sensor_data and sensor_data[0].get('timestamp'):
-                timestamp_str = sensor_data[0]['timestamp']
-                break
+        logger.info(f"✓ Event created successfully!")
+        logger.info(f"  Event ID: {event_result.get('event_id')}")
+        logger.info(f"  Fault ID: {event_result.get('fault_id')}")
+        logger.info(f"  Total rows inserted: {event_result.get('total_rows_inserted')}")
         
-        if not timestamp_str:
-            timestamp_str = dt.datetime.now().isoformat()
-        
-        logger.info(f"📅 Using timestamp from database: {timestamp_str}")
+        # Now load historical data for CSV generation
+        logger.info(f"🗄️ Loading historical data for CSV generation...")
+        historical_data = get_historical_statistics(limit=100)
         
         # Create fault data directory with timestamp subfolder
+        timestamp_str = failure_time_iso
         fault_data_dir = os.path.join(DATA_DIR, fault_name, timestamp_str)
         fault_event_dir = os.path.join(EVENTS_DIR, fault_name, timestamp_str)
         
@@ -311,12 +319,10 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         except Exception as dir_error:
             logger.warning(f"⚠️ Could not create event directory: {dir_error}")
         
-        # Process each sensor/physical parameter
+        # Process each sensor and generate CSVs
         created_files = []
-        csv_data = {}  # Store CSV content for response
-        deviation_points = {}
-        extracted_counts = {}
-        all_extracted_data = []  # Collect all extracted data for database insertion
+        csv_data = {}
+        extracted_counts = event_result.get('rows_per_sensor', {})
         
         # Define fieldnames for CSVs
         fieldnames = [
@@ -328,29 +334,17 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         
         for sensor_name in ['acceleration', 'current', 'audio']:
             sensor_data = historical_data.get(sensor_name, [])
-            logger.info(f"🔍 Processing {sensor_name}: {len(sensor_data)} records available")
+            logger.info(f"🔍 Processing {sensor_name} for CSV: {len(sensor_data)} records available")
             
             if not sensor_data:
-                logger.warning(f"⚠️ No data for {sensor_name}, skipping")
+                logger.warning(f"⚠️ No data for {sensor_name}, skipping CSV")
                 continue
             
             try:
-                # Detect deviation point
-                deviation_idx, baseline = detect_fault_deviation(sensor_data)
-                deviation_points[sensor_name] = deviation_idx
-                logger.info(f"📍 {sensor_name}: deviation detected at index {deviation_idx}")
-                
-                # Determine extraction range (3 before + from deviation onward)
-                start_idx = max(0, deviation_idx - num_intervals_before)
-                end_idx = len(sensor_data)
-                
-                extracted_data = sensor_data[start_idx:end_idx]
-                extracted_counts[sensor_name] = len(extracted_data)
-                logger.info(f"✂️ {sensor_name}: extracting {len(extracted_data)} records (indices {start_idx}-{end_idx})")
-                
-                # Collect all extracted data for database insertion — tag with sensor identity
-                tagged_data = [{**dp, 'sensor_type': sensor_name} for dp in extracted_data]
-                all_extracted_data.extend(tagged_data)
+                # Use all available sensor data for CSV
+                extracted_data = sensor_data
+                num_extracted = len(extracted_data)
+                logger.info(f"✂️ {sensor_name}: using {num_extracted} records for CSV")
                 
                 # Generate CSV content in memory
                 logger.info(f"📝 Generating CSV for {sensor_name}")
@@ -411,38 +405,24 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
                 'error': error_msg
             }
         
-        # ==================== INSERT TO NEON DATABASE ====================
-        fault_id = None
-        rows_inserted = 0
-        database_table = None
+        # ==================== DATABASE INSERTION (ALREADY DONE) ====================
+        # The multi-sensor event was already created and inserted to database above
+        fault_id = event_result.get('fault_id')
+        rows_inserted = event_result.get('total_rows_inserted', 0)
+        database_table = None  # Multi-sensor uses multiple tables
         
-        try:
-            if all_extracted_data:
-                db_result = insert_event_from_historical_data(fault_name, all_extracted_data)
-                fault_id = db_result['fault_id']
-                rows_inserted = db_result['rows_inserted']
-                database_table = db_result['table_name']
-                
-                logger.info(f"✓ Event data inserted to database!")
-                logger.info(f"  Table: {database_table}")
-                logger.info(f"  Fault ID: {fault_id}")
-                logger.info(f"  Rows Inserted: {rows_inserted}")
-            else:
-                logger.warning(f"⚠️ No extracted data to insert to database")
-        except Exception as db_error:
-            logger.error(f"❌ Error saving to database: {db_error}")
-            # Continue anyway - data extraction was successful
+        logger.info(f"✓ Multi-sensor event data already inserted to database!")
+        logger.info(f"  Fault ID: {fault_id}")
+        logger.info(f"  Total rows inserted: {rows_inserted}")
         
         logger.info(f"🎉 Event creation successful! Generated {len(csv_data)} CSV datasets")
         return {
             'success': True,
             'fault_name': fault_name,
             'timestamp': timestamp_str,
-            'deviation_points': deviation_points,
             'intervals_extracted': extracted_counts,
             'fault_id': fault_id,
             'rows_inserted': rows_inserted,
-            'database_table': database_table,
             'csv_data': csv_data,  # CSV content for immediate download
             'files_created': created_files,
             'data_dir': fault_data_dir,
