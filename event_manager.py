@@ -159,6 +159,9 @@ class EventManager:
         """
         from database import get_connection
         from datetime import datetime, timedelta
+        import logging
+        
+        logger = logging.getLogger(__name__)
         
         sensor_data = {'acceleration': [], 'current': [], 'audio': []}
         table_names = {
@@ -169,6 +172,7 @@ class EventManager:
         
         # Calculate 24 hours ago
         time_24h_ago = datetime.now() - timedelta(hours=24)
+        logger.info(f"🔍 Querying database for data from last 24 hours (since {time_24h_ago})")
         
         try:
             conn = get_connection()
@@ -189,43 +193,66 @@ class EventManager:
                         ORDER BY created_at ASC
                     """
                     
+                    logger.debug(f"Executing query for {sensor_type}: {query}")
                     cur.execute(query, (time_24h_ago,))
                     rows = cur.fetchall()
                     
-                    for row in rows:
-                        feature_data = {
-                            'timestamp': row[18].timestamp() * 1000,  # created_at in milliseconds
-                            'min': row[0],           # x_min
-                            'max': row[1],           # x_max
-                            'mean': row[2],          # mean
-                            'std_dev': row[3],       # standard_deviation
-                            'range': row[4],         # range
-                            'variance': row[5],      # variance
-                            'skewness': row[6],      # skewness
-                            'kurtosis': row[7],      # kurtosis
-                            'frequency1': row[8],
-                            'frequency2': row[9],
-                            'frequency3': row[10],
-                            'frequency4': row[11],
-                            'frequency5': row[12],
-                            'amplitude1': row[13],
-                            'amplitude2': row[14],
-                            'amplitude3': row[15],
-                            'amplitude4': row[16],
-                            'amplitude5': row[17],
-                        }
-                        sensor_data[sensor_type].append(feature_data)
+                    logger.info(f"✓ Query returned {len(rows)} {sensor_type} records from database")
                     
-                    print(f"✓ Loaded {len(sensor_data[sensor_type])} {sensor_type} records from DB")
+                    if not rows:
+                        logger.warning(f"⚠️ No data found for {sensor_type} in last 24 hours")
+                    
+                    for row in rows:
+                        try:
+                            created_at = row[18]  # created_at column
+                            if created_at:
+                                timestamp_ms = created_at.timestamp() * 1000
+                            else:
+                                timestamp_ms = 0
+                                logger.warning(f"Null timestamp found for {sensor_type}")
+                                
+                            feature_data = {
+                                'timestamp': timestamp_ms,
+                                'min': row[0],           # x_min
+                                'max': row[1],           # x_max
+                                'mean': row[2],          # mean
+                                'std_dev': row[3],       # standard_deviation
+                                'range': row[4],         # range
+                                'variance': row[5],      # variance
+                                'skewness': row[6],      # skewness
+                                'kurtosis': row[7],      # kurtosis
+                                'frequency1': row[8],
+                                'frequency2': row[9],
+                                'frequency3': row[10],
+                                'frequency4': row[11],
+                                'frequency5': row[12],
+                                'amplitude1': row[13],
+                                'amplitude2': row[14],
+                                'amplitude3': row[15],
+                                'amplitude4': row[16],
+                                'amplitude5': row[17],
+                            }
+                            sensor_data[sensor_type].append(feature_data)
+                        except Exception as row_error:
+                            logger.error(f"Error processing row for {sensor_type}: {row_error}")
+                            continue
+                    
+                    logger.info(f"✓ Loaded {len(sensor_data[sensor_type])} {sensor_type} records (mapped to feature dict)")
                     
                 except Exception as e:
-                    print(f"Error loading {sensor_type} data from database: {e}")
+                    logger.error(f"❌ Error loading {sensor_type} data from database: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    sensor_data[sensor_type] = []
                     continue
             
             conn.close()
+            logger.info(f"📊 Total loaded - acceleration: {len(sensor_data['acceleration'])}, current: {len(sensor_data['current'])}, audio: {len(sensor_data['audio'])}")
             
         except Exception as e:
-            print(f"Error connecting to database: {e}")
+            logger.error(f"❌ Database connection error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
         
         return sensor_data
@@ -512,7 +539,7 @@ class EventManager:
         sensor_data = self._load_all_sensor_data()
         
         if not sensor_data.get('acceleration'):
-            raise ValueError("No acceleration data available in Data directory")
+            raise ValueError("No acceleration data available in database tables (acceleration, current, audio). Check: 1) Database connection, 2) Tables are populated, 3) Data exists from last 24 hours")
         
         # Extract multi-sensor trends
         multi_sensor_trends = self._extract_multi_sensor_trends(sensor_data)
