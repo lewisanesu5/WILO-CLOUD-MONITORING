@@ -170,9 +170,7 @@ class EventManager:
             'audio': 'audio'
         }
         
-        # Calculate 24 hours ago
-        time_24h_ago = datetime.now() - timedelta(hours=24)
-        logger.info(f"🔍 Querying database for data from last 24 hours (since {time_24h_ago})")
+        logger.info(f"🔍 Querying database for all available data (no time filter)")
         
         try:
             conn = get_connection()
@@ -180,7 +178,7 @@ class EventManager:
             
             for sensor_type, table_name in table_names.items():
                 try:
-                    # Query last 24 hours of MAX file_type data, ordered by created_at ASC (chronological)
+                    # Query ALL MAX file_type data, ordered by created_at ASC (chronological)
                     query = f"""
                         SELECT 
                             x_min, x_max, mean, standard_deviation, range,
@@ -189,12 +187,12 @@ class EventManager:
                             amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
                             created_at, file_type
                         FROM {table_name}
-                        WHERE created_at >= %s AND file_type = 'max'
+                        WHERE file_type = 'max'
                         ORDER BY created_at ASC
                     """
                     
                     logger.debug(f"Executing query for {sensor_type}: {query}")
-                    cur.execute(query, (time_24h_ago,))
+                    cur.execute(query)
                     rows = cur.fetchall()
                     
                     logger.info(f"✓ Query returned {len(rows)} {sensor_type} records from database")
