@@ -182,7 +182,7 @@ class EventManager:
                     query = f"""
                         SELECT 
                             x_min, x_max, mean, standard_deviation, range,
-                            variance, skewness, kurtosis,
+                            skewness, kurtosis,
                             frequency1, frequency2, frequency3, frequency4, frequency5,
                             amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
                             created_at, file_type
@@ -202,33 +202,34 @@ class EventManager:
                     
                     for row in rows:
                         try:
-                            created_at = row[18]  # created_at column
+                            created_at = row[17]  # created_at column
                             if created_at:
                                 timestamp_ms = created_at.timestamp() * 1000
                             else:
                                 timestamp_ms = 0
                                 logger.warning(f"Null timestamp found for {sensor_type}")
                                 
+                            std_dev_val = row[3] if row[3] is not None else 0.0
                             feature_data = {
                                 'timestamp': timestamp_ms,
                                 'min': row[0],           # x_min
                                 'max': row[1],           # x_max
                                 'mean': row[2],          # mean
-                                'std_dev': row[3],       # standard_deviation
+                                'std_dev': std_dev_val,  # standard_deviation
                                 'range': row[4],         # range
-                                'variance': row[5],      # variance
-                                'skewness': row[6],      # skewness
-                                'kurtosis': row[7],      # kurtosis
-                                'frequency1': row[8],
-                                'frequency2': row[9],
-                                'frequency3': row[10],
-                                'frequency4': row[11],
-                                'frequency5': row[12],
-                                'amplitude1': row[13],
-                                'amplitude2': row[14],
-                                'amplitude3': row[15],
-                                'amplitude4': row[16],
-                                'amplitude5': row[17],
+                                'variance': std_dev_val ** 2,  # variance calculated from std_dev
+                                'skewness': row[5],      # skewness
+                                'kurtosis': row[6],      # kurtosis
+                                'frequency1': row[7],
+                                'frequency2': row[8],
+                                'frequency3': row[9],
+                                'frequency4': row[10],
+                                'frequency5': row[11],
+                                'amplitude1': row[12],
+                                'amplitude2': row[13],
+                                'amplitude3': row[14],
+                                'amplitude4': row[15],
+                                'amplitude5': row[16],
                             }
                             sensor_data[sensor_type].append(feature_data)
                         except Exception as row_error:

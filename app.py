@@ -155,7 +155,7 @@ def get_historical_statistics(limit=100):
             try:
                 query = f"""
                     SELECT 
-                        x_min, x_max, mean, standard_deviation, range, variance, skewness, kurtosis,
+                        x_min, x_max, mean, standard_deviation, range, skewness, kurtosis,
                         frequency1, frequency2, frequency3, frequency4, frequency5,
                         amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
                         created_at, file_type
@@ -169,27 +169,30 @@ def get_historical_statistics(limit=100):
                 
                 logger.info(f"✓ Fetched {len(rows)} MAX records from {sensor} table")
                 
-                result[sensor] = [{
-                    'min': row['x_min'],
-                    'max': row['x_max'],
-                    'mean': row['mean'],
-                    'std_dev': row['standard_deviation'],
-                    'range': row.get('range'),
-                    'variance': row.get('variance'),
-                    'skewness': row['skewness'],
-                    'kurtosis': row['kurtosis'],
-                    'frequency1': row.get('frequency1'),
-                    'frequency2': row.get('frequency2'),
-                    'frequency3': row.get('frequency3'),
-                    'frequency4': row.get('frequency4'),
-                    'frequency5': row.get('frequency5'),
-                    'amplitude1': row.get('amplitude1'),
-                    'amplitude2': row.get('amplitude2'),
-                    'amplitude3': row.get('amplitude3'),
-                    'amplitude4': row.get('amplitude4'),
-                    'amplitude5': row.get('amplitude5'),
-                    'timestamp': row['created_at'].isoformat() if row['created_at'] else None
-                } for row in rows]
+                result[sensor] = []
+                for row in rows:
+                    std_dev = row['standard_deviation'] if row['standard_deviation'] is not None else 0.0
+                    result[sensor].append({
+                        'min': row['x_min'],
+                        'max': row['x_max'],
+                        'mean': row['mean'],
+                        'std_dev': std_dev,
+                        'range': row.get('range'),
+                        'variance': std_dev ** 2,
+                        'skewness': row['skewness'],
+                        'kurtosis': row['kurtosis'],
+                        'frequency1': row.get('frequency1'),
+                        'frequency2': row.get('frequency2'),
+                        'frequency3': row.get('frequency3'),
+                        'frequency4': row.get('frequency4'),
+                        'frequency5': row.get('frequency5'),
+                        'amplitude1': row.get('amplitude1'),
+                        'amplitude2': row.get('amplitude2'),
+                        'amplitude3': row.get('amplitude3'),
+                        'amplitude4': row.get('amplitude4'),
+                        'amplitude5': row.get('amplitude5'),
+                        'timestamp': row['created_at'].isoformat() if row['created_at'] else None
+                    })
             except Exception as sensor_error:
                 logger.error(f"✗ Error fetching {sensor} data: {sensor_error}")
                 import traceback
