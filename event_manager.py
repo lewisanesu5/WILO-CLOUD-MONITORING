@@ -288,19 +288,52 @@ class EventManager:
     # _find_stable_baseline_idx removed — was a stub returning last index;
     # deviation onset is now detected dynamically in _extract_multi_sensor_trends.
     
+    # Minimum number of chronological MAX-mode upload cycles required to attempt
+    # any trend extraction.  With fewer points there is no baseline to compare
+    # against, deviation detection is impossible, and all slopes are 0.
+    MIN_TREND_POINTS = 5
+
     def _extract_multi_sensor_trends(self, sensor_data: Dict, failure_time_ms: Optional[float] = None) -> Dict[str, List[Dict]]:
         """
         Extract trend data for all sensors.
-        Dynamically detects when a statistical feature first starts to deviate from its normal baseline.
-        Extracts exactly 3 normal baseline points followed by the deviation ramp leading to failure.
+        Dynamically detects when a statistical feature first starts to deviate from its normal
+        baseline.  Extracts exactly 3 normal baseline points followed by the deviation ramp
+        leading to failure.
+
+        Raises ValueError if any sensor has fewer than MIN_TREND_POINTS data points,
+        because trend analysis requires a baseline period plus observable deviation.
         """
         ALL_FEATURES = ['mean', 'max', 'min', 'std_dev', 'variance', 'skewness', 'kurtosis']
-        
+
+        # ── Minimum data guard ──────────────────────────────────────────────────
+        # Each sensor must have at least MIN_TREND_POINTS chronological rows so
+        # that (a) a meaningful baseline can be established and (b) deviation from
+        # that baseline can be observed.  A single snapshot row produces all-zero
+        # slopes and no detectable deviation — i.e. meaningless output.
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        insufficient = {
+            s: len(sensor_data.get(s, []))
+            for s in ['acceleration', 'current', 'audio']
+            if len(sensor_data.get(s, [])) < self.MIN_TREND_POINTS
+        }
+        if insufficient:
+            detail = ", ".join(
+                f"{s}: {n} row(s)" for s, n in insufficient.items()
+            )
+            raise ValueError(
+                f"Insufficient data for trend extraction ({detail}). "
+                f"Need at least {self.MIN_TREND_POINTS} chronological MAX-mode upload "
+                f"cycles per sensor (currently only 1 snapshot row exists — no baseline "
+                f"comparison or deviation detection is possible)."
+            )
+        # ────────────────────────────────────────────────────────────────────────
+
         # Assume all sensors have same timestamps; use acceleration as reference
         accel_data = sensor_data.get('acceleration', [])
         if not accel_data:
             raise ValueError("No acceleration data available")
-        
+
         # Find failure index based on failure_time_ms if provided
         if failure_time_ms is not None:
             # find index of nearest point at or before failure_time_ms
