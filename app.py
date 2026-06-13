@@ -268,27 +268,14 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         Dict with 'success', 'intervals_extracted', 'fault_id', 'rows_inserted', etc.
     """
     try:
-        from event_manager import EventManager
         from datetime import datetime as dt_now
         
-        logger.info(f"🔄 START: Creating multi-sensor event for fault: {fault_name}")
+        # Use current time as the failure point
+        failure_time_iso = dt_now.now().isoformat()
         
-        # Initialize EventManager with Events and Data directories
-        event_manager_inst = EventManager('Events', 'Data')
-        
-        # Use current time as failure time
-        failure_time = dt_now.now()
-        failure_time_iso = failure_time.isoformat()
-        
-        logger.info(f"📊 Extracting multi-sensor trends using database tables (24-hour lookback)...")
-        logger.info(f"🎯 Failure time: {failure_time_iso}")
-        
-        # Create event using multi-sensor extraction - queries database directly
-        event_result = event_manager_inst.create_event(
-            event_name=fault_name,
-            failure_time_iso=failure_time_iso,
-            description=f"Multi-sensor event: {fault_name}"
-        )
+        # Create event using EventManager (handles multi-sensor extraction & database insertion)
+        logger.info(f"🔄 Creating event for fault: {fault_name} at {failure_time_iso}")
+        event_result = event_manager.create_event(fault_name, failure_time_iso, description="")
         
         if not event_result.get('success'):
             error_msg = event_result.get('error', 'Unknown error in event creation')
