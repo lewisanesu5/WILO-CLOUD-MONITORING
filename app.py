@@ -25,6 +25,7 @@ from database import (
 )
 from psycopg2.extras import RealDictCursor
 from event_manager import EventManager
+from fft_analysis import calculate_fft_analysis, calculate_fft_full_spectrum
 
 load_dotenv()
 
@@ -623,72 +624,9 @@ def calculate_statistics(values):
     
     return stats_dict
 
-def calculate_fft_analysis(values):
-    """
-    Calculate FFT and extract top 5 frequencies and amplitudes.
-    Returns frequencies in Hz and their corresponding amplitudes.
-    """
-    if not values or len(values) < 2:
-        return [], []
-    
-    z_array = np.array(values)
-    
-    # Perform FFT
-    fft_result = np.fft.fft(z_array)
-    frequencies = np.fft.fftfreq(len(z_array), d=1.0/SAMPLING_RATE)
-    amplitudes = np.abs(fft_result)
-    
-    # Get only positive frequencies
-    positive_freq_idx = frequencies > 0
-    positive_freqs = frequencies[positive_freq_idx]
-    positive_amps = amplitudes[positive_freq_idx]
-    
-    if len(positive_amps) == 0:
-        return [], []
-    
-    # Get top 5
-    top_indices = np.argsort(positive_amps)[-5:][::-1]
-    
-    top_frequencies = [float(positive_freqs[i]) for i in top_indices if i < len(positive_freqs)]
-    top_amplitudes = [float(positive_amps[i]) for i in top_indices if i < len(positive_amps)]
-    
-    # Pad with zeros if less than 5
-    while len(top_frequencies) < 5:
-        top_frequencies.append(0.0)
-        top_amplitudes.append(0.0)
-    
-    return top_frequencies[:5], top_amplitudes[:5]
+# FFT functions moved to fft_analysis.py
 
-def calculate_fft_full_spectrum(values):
-    """
-    Calculate full FFT spectrum for line graph visualization.
-    Returns frequencies in Hz and their corresponding amplitudes.
-    """
-    if not values or len(values) < 2:
-        return [], []
-    
-    z_array = np.array(values)
-    
-    # Perform FFT
-    fft_result = np.fft.fft(z_array)
-    frequencies = np.fft.fftfreq(len(z_array), d=1.0/SAMPLING_RATE)
-    amplitudes = np.abs(fft_result)
-    
-    # Get only positive frequencies
-    positive_freq_idx = frequencies > 0
-    positive_freqs = frequencies[positive_freq_idx]
-    positive_amps = amplitudes[positive_freq_idx]
-    
-    if len(positive_amps) == 0:
-        return [], []
-    
-    # Downsample to 500 points max for cleaner visualization
-    if len(positive_freqs) > 500:
-        step = len(positive_freqs) // 500
-        positive_freqs = positive_freqs[::step]
-        positive_amps = positive_amps[::step]
-    
-    return [float(f) for f in positive_freqs], [float(a) for a in positive_amps]
+# FFT full spectrum moved to fft_analysis.py (imported above)
 
 def get_sensor_health_status(stats_dict):
     """Determine health status based on statistics."""
