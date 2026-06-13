@@ -454,16 +454,16 @@ def insert_event_data(failure_type, multi_sensor_trends):
                         point.get('variance', 0),              # variance
                         point.get('skewness', 0),              # skewness
                         point.get('kurtosis', 0),              # kurtosis
-                        0,  # frequency1 (aggregated features don't have FFT)
-                        0,  # frequency2
-                        0,  # frequency3
-                        0,  # frequency4
-                        0,  # frequency5
-                        0,  # amplitude1
-                        0,  # amplitude2
-                        0,  # amplitude3
-                        0,  # amplitude4
-                        0   # amplitude5
+                        point.get('frequency1', 0),            # frequency1
+                        point.get('frequency2', 0),            # frequency2
+                        point.get('frequency3', 0),            # frequency3
+                        point.get('frequency4', 0),            # frequency4
+                        point.get('frequency5', 0),            # frequency5
+                        point.get('amplitude1', 0),            # amplitude1
+                        point.get('amplitude2', 0),            # amplitude2
+                        point.get('amplitude3', 0),            # amplitude3
+                        point.get('amplitude4', 0),            # amplitude4
+                        point.get('amplitude5', 0)             # amplitude5
                     ))
                     sensor_rows += 1
                     total_rows_inserted += 1

@@ -429,6 +429,16 @@ class EventManager:
                     'kurtosis': sensor_points[i].get('kurtosis', 0),
                     'variance': sensor_points[i].get('variance', 0),
                     'skewness': sensor_points[i].get('skewness', 0),
+                    'frequency1': sensor_points[i].get('frequency1', 0),
+                    'frequency2': sensor_points[i].get('frequency2', 0),
+                    'frequency3': sensor_points[i].get('frequency3', 0),
+                    'frequency4': sensor_points[i].get('frequency4', 0),
+                    'frequency5': sensor_points[i].get('frequency5', 0),
+                    'amplitude1': sensor_points[i].get('amplitude1', 0),
+                    'amplitude2': sensor_points[i].get('amplitude2', 0),
+                    'amplitude3': sensor_points[i].get('amplitude3', 0),
+                    'amplitude4': sensor_points[i].get('amplitude4', 0),
+                    'amplitude5': sensor_points[i].get('amplitude5', 0),
                 }
                 
                 # Calculate slopes for ALL features at this point
