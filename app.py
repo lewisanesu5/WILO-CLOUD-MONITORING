@@ -219,302 +219,59 @@ def get_historical_statistics(limit=100):
                 logger.warning(f"Warning closing connection: {close_err}")
 
 
-def detect_fault_deviation(sensor_data, window_size=5):
-    """
-    Detect deviation point where parameters start deviating from normal baseline.
-    Uses moving average and standard deviation to identify anomalies.
-    
-    Returns:
-        Tuple of (deviation_point_index, baseline_stats)
-    """
-    if not sensor_data or len(sensor_data) < window_size:
-        return len(sensor_data) - 1, {}
-    
-    # Calculate baseline from first few points
-    baseline_window = sensor_data[:window_size]
-    baseline_mean_values = [p['mean'] for p in baseline_window]
-    baseline_std_values = [p['std_dev'] for p in baseline_window]
-    
-    baseline = {
-        'mean': np.mean(baseline_mean_values),
-        'std_dev': np.mean(baseline_std_values),
-        'kurtosis': np.mean([p['kurtosis'] for p in baseline_window])
-    }
-    
-    # Look for significant deviation
-    threshold_multiplier = 2.0  # Deviation is 2x baseline std_dev
-    
-    for i in range(window_size, len(sensor_data)):
-        point = sensor_data[i]
-        deviation_from_mean = abs(point['mean'] - baseline['mean'])
-        
-        if deviation_from_mean > threshold_multiplier * baseline['std_dev']:
-            return i, baseline
-    
-    # If no significant deviation found, return last point
-    return len(sensor_data) - 1, baseline
-
 
 def create_fault_event_csv(fault_name, num_intervals_before=3):
     """
-    Extract historical trend data using multi-sensor approach.
-    Uses EventManager.create_event() for unified multi-sensor trend extraction
-    from database tables (acceleration, current, audio).
-    
+    Extract historical trend data and record it in the database.
+    Uses EventManager.create_event() for unified multi-sensor trend
+    extraction from sensor tables (acceleration, current, audio).
+
+    CSV file writing has been removed - the database is the sole store
+    for event data.
+
     Args:
         fault_name: Name of the fault (e.g., "Motor Stall")
-        num_intervals_before: Number of intervals before deviation point (kept for API compatibility)
-    
+        num_intervals_before: Kept for API compatibility.
+
     Returns:
-        Dict with 'success', 'intervals_extracted', 'fault_id', 'rows_inserted', etc.
+        Dict with success, intervals_extracted, fault_id, rows_inserted.
     """
     try:
         from datetime import datetime as dt_now
-        
-        # Use current time as the failure point
+
         failure_time_iso = dt_now.now().isoformat()
-        
-        # Create event using EventManager (handles multi-sensor extraction & database insertion)
-        logger.info(f"🔄 Creating event for fault: {fault_name} at {failure_time_iso}")
+
+        logger.info("Creating event for fault: %s at %s", fault_name, failure_time_iso)
         event_result = event_manager.create_event(fault_name, failure_time_iso, description="")
-        
-        if not event_result.get('success'):
-            error_msg = event_result.get('error', 'Unknown error in event creation')
-            logger.error(f"❌ Multi-sensor event creation failed: {error_msg}")
-            return {
-                'success': False,
-                'error': error_msg
-            }
-        
-        logger.info(f"✓ Event created successfully!")
-        logger.info(f"  Event ID: {event_result.get('event_id')}")
-        logger.info(f"  Fault ID: {event_result.get('fault_id')}")
-        logger.info(f"  Total rows inserted: {event_result.get('total_rows_inserted')}")
-        
-        # Now load historical data for CSV generation
-        logger.info(f"🗄️ Loading historical data for CSV generation...")
-        historical_data = get_historical_statistics(limit=100)
-        
-        # Create fault data directory with timestamp subfolder
-        timestamp_str = failure_time_iso
-        fault_data_dir = os.path.join(DATA_DIR, fault_name, timestamp_str)
-        fault_event_dir = os.path.join(EVENTS_DIR, fault_name, timestamp_str)
-        
-        logger.info(f"📁 Creating timestamped data directory: {fault_data_dir}")
-        try:
-            os.makedirs(fault_data_dir, exist_ok=True)
-            logger.info(f"✓ Data directory ready: {fault_data_dir}")
-        except Exception as dir_error:
-            logger.warning(f"⚠️ Could not create data directory: {dir_error}")
-        
-        logger.info(f"📁 Creating timestamped event directory: {fault_event_dir}")
-        try:
-            os.makedirs(fault_event_dir, exist_ok=True)
-            logger.info(f"✓ Event directory ready: {fault_event_dir}")
-        except Exception as dir_error:
-            logger.warning(f"⚠️ Could not create event directory: {dir_error}")
-        
-        # Process each sensor and generate CSVs
-        created_files = []
-        csv_data = {}
-        extracted_counts = event_result.get('rows_per_sensor', {})
-        
-        # Define fieldnames for CSVs
-        fieldnames = [
-            'timestamp',
-            'mean', 'max', 'min', 'std_dev', 'skewness', 'kurtosis',
-            'frequency1', 'frequency2', 'frequency3', 'frequency4', 'frequency5',
-            'amplitude1', 'amplitude2', 'amplitude3', 'amplitude4', 'amplitude5'
-        ]
-        
-        for sensor_name in ['acceleration', 'current', 'audio']:
-            sensor_data = historical_data.get(sensor_name, [])
-            logger.info(f"🔍 Processing {sensor_name} for CSV: {len(sensor_data)} records available")
-            
-            if not sensor_data:
-                logger.warning(f"⚠️ No data for {sensor_name}, skipping CSV")
-                continue
-            
-            try:
-                # Use all available sensor data for CSV
-                extracted_data = sensor_data
-                num_extracted = len(extracted_data)
-                logger.info(f"✂️ {sensor_name}: using {num_extracted} records for CSV")
-                
-                # Generate CSV content in memory
-                logger.info(f"📝 Generating CSV for {sensor_name}")
-                csv_content = io.StringIO()
-                writer = csv.DictWriter(csv_content, fieldnames=fieldnames)
-                writer.writeheader()
-                rows_written = 0
-                
-                for data_point in extracted_data:
-                    writer.writerow({
-                        'timestamp': data_point.get('timestamp', ''),
-                        'mean': data_point.get('mean', ''),
-                        'max': data_point.get('max', ''),
-                        'min': data_point.get('min', ''),
-                        'std_dev': data_point.get('std_dev', ''),
-                        'skewness': data_point.get('skewness', ''),
-                        'kurtosis': data_point.get('kurtosis', ''),
-                        'frequency1': data_point.get('frequency1', ''),
-                        'frequency2': data_point.get('frequency2', ''),
-                        'frequency3': data_point.get('frequency3', ''),
-                        'frequency4': data_point.get('frequency4', ''),
-                        'frequency5': data_point.get('frequency5', ''),
-                        'amplitude1': data_point.get('amplitude1', ''),
-                        'amplitude2': data_point.get('amplitude2', ''),
-                        'amplitude3': data_point.get('amplitude3', ''),
-                        'amplitude4': data_point.get('amplitude4', ''),
-                        'amplitude5': data_point.get('amplitude5', '')
-                    })
-                    rows_written += 1
-                
-                csv_text = csv_content.getvalue()
-                csv_data[sensor_name] = csv_text
-                logger.info(f"✅ CSV generated for {sensor_name} ({rows_written} rows)")
-                
-                # Write to disk in timestamped folder
-                csv_filename = os.path.join(fault_data_dir, f'{sensor_name}_trend.csv')
-                try:
-                    with open(csv_filename, 'w', newline='') as csvfile:
-                        csvfile.write(csv_text)
-                    logger.info(f"✅ CSV file written: {csv_filename}")
-                    created_files.append(csv_filename)
-                except Exception as write_error:
-                    logger.warning(f"⚠️ Could not write CSV to disk: {write_error}")
-                    # Still add to created files since we have the content
-                    created_files.append(csv_filename)
-                
-            except Exception as sensor_error:
-                logger.error(f"❌ Error processing {sensor_name}: {sensor_error}")
-                import traceback
-                logger.error(traceback.format_exc())
-                continue
-        
-        if not csv_data:
-            error_msg = "No CSV data generated - all sensors had no data or encountered errors"
-            logger.error(f"❌ {error_msg}")
-            return {
-                'success': False,
-                'error': error_msg
-            }
-        
-        # ==================== DATABASE INSERTION (ALREADY DONE) ====================
-        # The multi-sensor event was already created and inserted to database above
-        fault_id = event_result.get('fault_id')
-        rows_inserted = event_result.get('total_rows_inserted', 0)
-        database_table = None  # Multi-sensor uses multiple tables
-        
-        logger.info(f"✓ Multi-sensor event data already inserted to database!")
-        logger.info(f"  Fault ID: {fault_id}")
-        logger.info(f"  Total rows inserted: {rows_inserted}")
-        
-        logger.info(f"🎉 Event creation successful! Generated {len(csv_data)} CSV datasets")
+
+        if not event_result.get("success"):
+            error_msg = event_result.get("error", "Unknown error in event creation")
+            logger.error("Event creation failed: %s", error_msg)
+            return {"success": False, "error": error_msg}
+
+        fault_id = event_result.get("fault_id")
+        rows_inserted = event_result.get("total_rows_inserted", 0)
+        extracted_counts = event_result.get("rows_per_sensor", {})
+
+        logger.info("Event recorded in database: fault_id=%s, rows=%s", fault_id, rows_inserted)
         return {
-            'success': True,
-            'fault_name': fault_name,
-            'timestamp': timestamp_str,
-            'intervals_extracted': extracted_counts,
-            'fault_id': fault_id,
-            'rows_inserted': rows_inserted,
-            'csv_data': csv_data,  # CSV content for immediate download
-            'files_created': created_files,
-            'data_dir': fault_data_dir,
-            'event_dir': fault_event_dir
+            "success": True,
+            "fault_name": fault_name,
+            "timestamp": failure_time_iso,
+            "intervals_extracted": extracted_counts,
+            "fault_id": fault_id,
+            "rows_inserted": rows_inserted,
         }
-        
+
     except Exception as e:
-        logger.error(f"❌ Error creating fault event CSV: {e}")
+        logger.error("Error creating fault event: %s", e)
         import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
 
 
-def save_fault_event_data(fault_name, stats_data):
-
-    """
-    Save fault event data to CSV when failure occurs.
-    Creates a folder in Data/{FaultName} and saves statistical parameters.
-    Includes 3 intervals before failure + the failure interval.
-    """
-    try:
-        # Get failure interval
-        failure_interval = stats_data.get('failure_interval')
-        if not failure_interval:
-            return  # No failure yet
-        
-        # Create fault folder in Data directory
-        fault_data_dir = os.path.join(DATA_DIR, fault_name)
-        os.makedirs(fault_data_dir, exist_ok=True)
-        
-        # Get all intervals
-        all_intervals = stats_data.get('intervals', [])
-        
-        # Calculate which intervals to include (3 before + failure interval)
-        start_idx = max(0, failure_interval - 4)  # 3 before + failure
-        included_intervals = all_intervals[start_idx:failure_interval]  # Includes failure interval
-        
-        # Create CSV file with timestamp
-        timestamp = dt.datetime.now().strftime('%Y%m%d_%H%M%S')
-        csv_filename = os.path.join(fault_data_dir, f'{fault_name}_{timestamp}_event.csv')
-        
-        # Prepare CSV data with all statistical parameters
-        fieldnames = [
-            'interval', 'timestamp', 'system_failure_state',
-            # Acceleration
-            'accel_mean', 'accel_max', 'accel_min', 'accel_std_dev', 'accel_rms', 'accel_kurtosis', 'accel_skewness',
-            # Current
-            'current_mean', 'current_max', 'current_min', 'current_std_dev', 'current_rms',
-            # Audio
-            'audio_mean', 'audio_max', 'audio_min', 'audio_std_dev', 'audio_rms'
-        ]
-        
-        with open(csv_filename, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            
-            for interval_data in included_intervals:
-                accel_stats = interval_data.get('acceleration', {})
-                current_stats = interval_data.get('current', {})
-                audio_stats = interval_data.get('audio', {})
-                
-                row = {
-                    'interval': interval_data.get('interval'),
-                    'timestamp': interval_data.get('timestamp'),
-                    'system_failure_state': interval_data.get('system_failure_state', False),
-                    # Acceleration
-                    'accel_mean': accel_stats.get('mean', ''),
-                    'accel_max': accel_stats.get('max', ''),
-                    'accel_min': accel_stats.get('min', ''),
-                    'accel_std_dev': accel_stats.get('std_dev', ''),
-                    'accel_rms': accel_stats.get('rms', ''),
-                    'accel_kurtosis': accel_stats.get('kurtosis', ''),
-                    'accel_skewness': accel_stats.get('skewness', ''),
-                    # Current
-                    'current_mean': current_stats.get('mean', ''),
-                    'current_max': current_stats.get('max', ''),
-                    'current_min': current_stats.get('min', ''),
-                    'current_std_dev': current_stats.get('std_dev', ''),
-                    'current_rms': current_stats.get('rms', ''),
-                    # Audio
-                    'audio_mean': audio_stats.get('mean', ''),
-                    'audio_max': audio_stats.get('max', ''),
-                    'audio_min': audio_stats.get('min', ''),
-                    'audio_std_dev': audio_stats.get('std_dev', ''),
-                    'audio_rms': audio_stats.get('rms', '')
-                }
-                writer.writerow(row)
-        
-        logger.info(f"✓ Saved fault event data: {csv_filename}")
-        return csv_filename
-        
-    except Exception as e:
-        logger.error(f"Error saving fault event data: {e}")
-        return None
+# save_fault_event_data removed — event data is stored exclusively in the database
+# via EventManager.create_event() → database.insert_event_data()
 
 # Upload security configuration
 UPLOAD_API_KEYS = {

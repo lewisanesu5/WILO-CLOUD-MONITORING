@@ -342,18 +342,23 @@ def create_event_table_if_not_exists(table_name):
                 pass
 
 
-def get_next_fault_id(failure_type):
+def get_next_fault_id(failure_type, conn=None):
     """
     Get the next fault_id for a given failure type.
     Fault ID increments per event for each failure type independently.
+    Supports transaction reuse to avoid race conditions.
     
     Args:
         failure_type: Name of the failure (e.g., "Motor Stall")
+        conn: Optional existing database connection
         
     Returns:
         Next fault_id (integer starting from 1)
     """
-    conn = None
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
     try:
         table_name = FAILURE_TABLE_MAPPING.get(failure_type)
         if not table_name:
@@ -362,8 +367,9 @@ def get_next_fault_id(failure_type):
         # Ensure table exists before querying
         create_event_table_if_not_exists(table_name)
         
-        conn = get_connection()
         cur = conn.cursor()
+        # Lock the table in exclusive mode to ensure race-free fault_id assignment
+        cur.execute(f"LOCK TABLE {table_name} IN EXCLUSIVE MODE")
         
         # Get max fault_id from table
         query = f"SELECT MAX(fault_id) FROM {table_name}"
@@ -380,7 +386,7 @@ def get_next_fault_id(failure_type):
         logger.error(f"Error getting next fault_id for {failure_type}: {e}")
         raise
     finally:
-        if conn:
+        if should_close and conn:
             conn.close()
 
 
@@ -407,11 +413,11 @@ def insert_event_data(failure_type, multi_sensor_trends):
         if not table_name:
             raise ValueError(f"Unknown failure type: {failure_type}")
         
-        # Get next fault_id
-        fault_id = get_next_fault_id(failure_type)
-        
         conn = get_connection()
         cur = conn.cursor()
+        
+        # Get next fault_id within the same transaction to guarantee atomicity and race safety
+        fault_id = get_next_fault_id(failure_type, conn)
         
         # Prepare insert query
         query = f"""
@@ -432,16 +438,6 @@ def insert_event_data(failure_type, multi_sensor_trends):
                     # Convert timestamp (milliseconds) to datetime
                     timestamp_dt = datetime.fromtimestamp(point['timestamp'] / 1000)
                     
-                    # Calculate statistics for this point across the feature set
-                    # Use the aggregated features from the point data
-                    feature_values = [
-                        point.get('mean', 0),
-                        point.get('max', 0),
-                        point.get('min', 0),
-                        point.get('std_dev', 0),
-                        point.get('kurtosis', 0)
-                    ]
-                    
                     cur.execute(query, (
                         fault_id,                              # fault_id
                         sensor_type,                           # sensor_type
@@ -450,7 +446,7 @@ def insert_event_data(failure_type, multi_sensor_trends):
                         point.get('max', 0),                   # x_max
                         point.get('mean', 0),                  # mean
                         point.get('std_dev', 0),               # standard_deviation
-                        point.get('max', 0) - point.get('min', 0),  # range
+                        point.get('range', 0),                 # range (use stored range value)
                         point.get('variance', 0),              # variance
                         point.get('skewness', 0),              # skewness
                         point.get('kurtosis', 0),              # kurtosis
@@ -525,11 +521,11 @@ def insert_event_from_historical_data(failure_type, extracted_data):
         if not table_name:
             raise ValueError(f"Unknown failure type: {failure_type}")
         
-        # Get next fault_id for this failure type
-        fault_id = get_next_fault_id(failure_type)
-        
         conn = get_connection()
         cur = conn.cursor()
+        
+        # Get next fault_id for this failure type on the active connection
+        fault_id = get_next_fault_id(failure_type, conn)
         
         # Prepare insert query — includes sensor_type
         query = f"""
@@ -553,7 +549,9 @@ def insert_event_from_historical_data(failure_type, extracted_data):
                         timestamp_val = datetime.now()
                 
                 # Determine sensor_type from the data point (tagged in app.py)
-                sensor_type = data_point.get('sensor_type', 'acceleration')
+                sensor_type = data_point.get('sensor_type')
+                if sensor_type not in ('acceleration', 'current', 'audio'):
+                    raise ValueError(f"Invalid sensor_type: {sensor_type}. Must be 'acceleration', 'current', or 'audio'.")
                 
                 cur.execute(query, (
                     fault_id,                                           # fault_id

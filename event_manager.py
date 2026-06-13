@@ -71,7 +71,7 @@ def calculate_statistics(z_values):
         'shape_factor': safe_float(shape_factor),
         'clearance_factor': safe_float(clearance_factor),
         'skewness': safe_float(skewness),
-        'kurtosis': safe_float(kurtosis_val),
+        'kurtosis': safe_float(kurtosis_val + 3.0),
         'excess_kurtosis': safe_float(kurtosis_val),
         'energy': safe_float(energy),
         'zero_crossing_rate': safe_float(zero_crossing_rate),
@@ -282,62 +282,13 @@ class EventManager:
         
         return nearest_idx
     
-    def _calculate_feature_slopes(self, sensor_data: List[Dict], failure_idx: int) -> Dict:
-        """
-        Calculate slopes for all features (mean, max, std_dev, kurtosis) for a sensor.
-        
-        Args:
-            sensor_data: List of dicts with features for one sensor
-            failure_idx: Index of failure point
-            
-        Returns:
-            Dict with slope data for each feature
-        """
-        features = ['mean', 'max', 'std_dev', 'kurtosis']
-        slopes = {feature: [] for feature in features}
-        failure_time = sensor_data[failure_idx]['timestamp']
-        
-        # Calculate backwards from failure
-        for i in range(failure_idx, max(-1, failure_idx - 100), -1):
-            for feature in features:
-                if i == failure_idx:
-                    slope = 0.0
-                else:
-                    time_diff = sensor_data[i + 1]['timestamp'] - sensor_data[i]['timestamp']
-                    value_diff = sensor_data[i + 1][feature] - sensor_data[i][feature]
-                    
-                    if time_diff > 0:
-                        slope = value_diff / (time_diff / 1000)
-                    else:
-                        slope = 0.0
-                
-                slopes[feature].append({
-                    'timestamp': sensor_data[i]['timestamp'],
-                    'slope': slope,
-                    'value': sensor_data[i][feature],
-                    'time_delta': (sensor_data[i]['timestamp'] - failure_time) / 1000
-                })
-        
-        # Reverse to chronological order
-        for feature in slopes:
-            slopes[feature].reverse()
-        
-        return slopes
+    # _calculate_feature_slopes removed — slope computation is done inline
+    # inside _extract_multi_sensor_trends with correct forward/backward differences.
+    #
+    # _find_stable_baseline_idx removed — was a stub returning last index;
+    # deviation onset is now detected dynamically in _extract_multi_sensor_trends.
     
-    def _find_stable_baseline_idx(self, sensor_data: Dict) -> int:
-        """
-        Find index where all sensors show stable baseline (3 consecutive stable points).
-        Uses multi-sensor approach: ALL sensors must be stable.
-        
-        Args:
-            sensor_data: Dict with sensor data for all three sensors
-            
-        Returns:
-            Index of failure point (assuming last point is failure)
-        """
-        return len(sensor_data.get('acceleration', [])) - 1
-    
-    def _extract_multi_sensor_trends(self, sensor_data: Dict) -> Dict[str, List[Dict]]:
+    def _extract_multi_sensor_trends(self, sensor_data: Dict, failure_time_ms: Optional[float] = None) -> Dict[str, List[Dict]]:
         """
         Extract trend data for all sensors.
         Dynamically detects when a statistical feature first starts to deviate from its normal baseline.
@@ -350,12 +301,22 @@ class EventManager:
         if not accel_data:
             raise ValueError("No acceleration data available")
         
-        failure_idx = len(accel_data) - 1
+        # Find failure index based on failure_time_ms if provided
+        if failure_time_ms is not None:
+            # find index of nearest point at or before failure_time_ms
+            failure_idx = self._find_nearest_data_point(failure_time_ms, [(p['timestamp'], 0.0) for p in accel_data])
+            if failure_idx is None:
+                failure_idx = len(accel_data) - 1
+        else:
+            failure_idx = len(accel_data) - 1
+            
         failure_time = accel_data[failure_idx]['timestamp']
         
         # Calculate normal baseline stats (mean & standard deviation) for each sensor and feature
-        # using the first 5 records of the dataset.
-        baseline_size = min(5, len(accel_data))
+        # using a robust baseline size (20% of data up to failure_idx, min 5, max 30)
+        baseline_size = max(5, min(30, int((failure_idx + 1) * 0.2)))
+        baseline_size = min(baseline_size, failure_idx + 1)
+        
         baselines = {}
         for sensor_type in ['acceleration', 'current', 'audio']:
             if sensor_type not in sensor_data or not sensor_data[sensor_type]:
@@ -374,7 +335,7 @@ class EventManager:
 
         # Detect the first index 'd' where any statistical feature starts behaving abnormally.
         deviation_idx = None
-        for i in range(baseline_size, len(accel_data)):
+        for i in range(baseline_size, failure_idx + 1):
             for sensor_type in ['acceleration', 'current', 'audio']:
                 if sensor_type not in sensor_data or i >= len(sensor_data[sensor_type]):
                     continue
@@ -385,8 +346,10 @@ class EventManager:
                         continue
                     b_mean, b_std = baselines[sensor_type].get(feature, (0.0, 0.0))
                     
-                    # Establish an adaptive threshold (min 0.05 or 5% of baseline value to avoid noise triggering)
-                    threshold = max(3.0 * b_std, 0.05 * abs(b_mean), 0.05)
+                    # Establish an adaptive threshold (3.0 * std, or at least 5% of mean, with a tiny fallback floor to avoid noise on absolute zero)
+                    threshold = max(3.0 * b_std, 0.05 * abs(b_mean))
+                    if threshold < 1e-5:
+                        threshold = 1e-5
                     
                     if abs(val - b_mean) > threshold:
                         deviation_idx = i
@@ -458,8 +421,24 @@ class EventManager:
                         # No time diff
                         for feature in ALL_FEATURES:
                             point_data[f'{feature}_slope'] = 0.0
+                elif i > 0:
+                    # For the last point (failure), estimate slope from the previous point (backward slope)
+                    prev_point = sensor_points[i - 1]
+                    time_diff = sensor_points[i]['timestamp'] - prev_point['timestamp']
+                    
+                    if time_diff > 0:
+                        point_data['mean_slope'] = (sensor_points[i]['mean'] - prev_point['mean']) / (time_diff / 1000)
+                        point_data['max_slope'] = (sensor_points[i]['max'] - prev_point['max']) / (time_diff / 1000)
+                        point_data['min_slope'] = (sensor_points[i]['min'] - prev_point['min']) / (time_diff / 1000)
+                        point_data['std_dev_slope'] = (sensor_points[i]['std_dev'] - prev_point['std_dev']) / (time_diff / 1000)
+                        point_data['variance_slope'] = (sensor_points[i]['variance'] - prev_point['variance']) / (time_diff / 1000)
+                        point_data['skewness_slope'] = (sensor_points[i]['skewness'] - prev_point['skewness']) / (time_diff / 1000)
+                        point_data['kurtosis_slope'] = (sensor_points[i]['kurtosis'] - prev_point['kurtosis']) / (time_diff / 1000)
+                    else:
+                        for feature in ALL_FEATURES:
+                            point_data[f'{feature}_slope'] = 0.0
                 else:
-                    # Last point (failure) - slopes are zero
+                    # Single point fallback
                     for feature in ALL_FEATURES:
                         point_data[f'{feature}_slope'] = 0.0
                 
@@ -468,71 +447,6 @@ class EventManager:
             trends[sensor_type] = trend_data
         
         return trends
-
-        """
-        Calculate slopes BACKWARDS from the failure point to previous data.
-        This shows what LED TO the failure, including the stable baseline period.
-        Extracts: all deviation points + 3 stable baseline points.
-        
-        Args:
-            data_points: List of (timestamp, value) tuples
-            failure_idx: Index of failure point
-            
-        Returns:
-            List of dicts with timestamp, value, slope, and time_delta (going backwards)
-        """
-        NEGLIGIBLE_SLOPE_THRESHOLD = 0.001  # Threshold for detecting "stable" slopes
-        MAX_LOOKBACK_POINTS = 100  # Maximum number of points to track backwards
-        STABLE_POINTS_TO_CAPTURE = 3  # Number of consecutive stable points to include in baseline
-        
-        slope_data = []
-        failure_time = data_points[failure_idx][0]
-        stable_slope_count = 0  # Track consecutive stable slopes
-        
-        # Start from failure and go backwards
-        for i in range(failure_idx, max(-1, failure_idx - MAX_LOOKBACK_POINTS), -1):
-            timestamp = data_points[i][0]
-            value = data_points[i][1]
-            
-            # Calculate slope (comparing current point to next point in time)
-            if i == failure_idx:
-                slope = 0.0  # Failure point has no slope (reference point)
-            else:
-                next_timestamp = data_points[i + 1][0]
-                next_value = data_points[i + 1][1]
-                time_diff = next_timestamp - timestamp
-                value_diff = next_value - value
-                
-                # Avoid division by zero
-                if time_diff > 0:
-                    slope = value_diff / (time_diff / 1000)  # Slope per second
-                else:
-                    slope = 0.0
-            
-            # Time delta is negative (going backwards in time)
-            time_delta = (timestamp - failure_time) / 1000  # Convert to seconds (will be negative)
-            
-            slope_data.append({
-                'timestamp': timestamp,
-                'value': value,
-                'slope': slope,
-                'time_delta': time_delta
-            })
-            
-            # Track consecutive stable slopes (baseline detection)
-            if i < failure_idx and abs(slope) < NEGLIGIBLE_SLOPE_THRESHOLD:
-                stable_slope_count += 1
-            else:
-                stable_slope_count = 0  # Reset if deviation detected again
-            
-            # Stop once we've captured 3 consecutive stable points (stable baseline reached)
-            if stable_slope_count >= STABLE_POINTS_TO_CAPTURE:
-                break
-        
-        # Reverse the list so it's chronological (oldest to newest, ending at failure)
-        slope_data.reverse()
-        
-        return slope_data
     
     def create_event(self, event_name: str, failure_time_iso: str, description: str = "") -> Dict:
         """
@@ -561,7 +475,7 @@ class EventManager:
             raise ValueError("No acceleration data available in database tables (acceleration, current, audio). Check: 1) Database connection, 2) Tables are populated, 3) Data exists from last 24 hours")
         
         # Extract multi-sensor trends
-        multi_sensor_trends = self._extract_multi_sensor_trends(sensor_data)
+        multi_sensor_trends = self._extract_multi_sensor_trends(sensor_data, failure_time_ms)
         
         print(f"\n📊 Trend Extraction Results:")
         for sensor_type, trends in multi_sensor_trends.items():
@@ -640,7 +554,8 @@ class EventManager:
             'fault_id': fault_id,
             'total_rows_inserted': total_rows_inserted,
             'rows_per_sensor': rows_per_sensor,
-            'metadata': metadata
+            'metadata': metadata,
+            'multi_sensor_trends': multi_sensor_trends
         }
     
     def list_events(self) -> List[Dict]:
@@ -681,40 +596,98 @@ class EventManager:
     def get_event(self, event_id: str) -> Optional[Dict]:
         """
         Get detailed data for a specific event.
-        
+
+        Reads the metadata JSON (written locally at event creation time) and
+        queries trend rows from the fault-specific database table using the
+        fault_id stored in that metadata.  CSV files are no longer used.
+
         Args:
-            event_id: Event identifier
-            
+            event_id: Event identifier (e.g. "Motor_Stall_20260613_125401")
+
         Returns:
-            Dict with metadata and CSV data, or None if not found
+            Dict with 'metadata' and 'trend_data' (list of per-sensor rows),
+            or None if the metadata JSON is not found.
         """
+        from database import get_connection, FAILURE_TABLE_MAPPING
+
         json_path = os.path.join(self.events_dir, f"{event_id}.json")
-        csv_path = os.path.join(self.events_dir, f"{event_id}.csv")
-        
-        if not os.path.exists(json_path) or not os.path.exists(csv_path):
+        if not os.path.exists(json_path):
             return None
-        
-        # Load metadata
+
         with open(json_path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
-        
-        # Load CSV data
-        slope_data = []
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                slope_data.append({
-                    'timestamp': float(row['timestamp']),
-                    'timestamp_iso': row['timestamp_iso'],
-                    'value': float(row['value']),
-                    'slope': float(row['slope']),
-                    'time_delta_seconds': float(row['time_delta_seconds'])
+
+        fault_id   = metadata.get('fault_id_in_database')
+        event_name = metadata.get('event_name')
+        table_name = FAILURE_TABLE_MAPPING.get(event_name) if event_name else None
+
+        if fault_id is None or table_name is None:
+            # Metadata exists but we cannot map to a table — return metadata only
+            return {'metadata': metadata, 'trend_data': []}
+
+        try:
+            conn = get_connection()
+            cur  = conn.cursor()
+            cur.execute(
+                f"""
+                SELECT sensor_type, timestamp,
+                       mean, x_max, x_min, standard_deviation,
+                       range, variance, skewness, kurtosis,
+                       frequency1, frequency2, frequency3, frequency4, frequency5,
+                       amplitude1, amplitude2, amplitude3, amplitude4, amplitude5
+                FROM {table_name}
+                WHERE fault_id = %s
+                ORDER BY sensor_type, timestamp
+                """,
+                (fault_id,)
+            )
+            rows = cur.fetchall()
+            conn.close()
+
+            def _f(v):
+                """Safe float conversion."""
+                try:
+                    return float(v) if v is not None else 0.0
+                except (TypeError, ValueError):
+                    return 0.0
+
+            trend_data = []
+            for row in rows:
+                ts_raw = row[1]
+                ts_ms  = (ts_raw.timestamp() * 1000
+                          if hasattr(ts_raw, 'timestamp') else _f(ts_raw))
+                trend_data.append({
+                    'sensor_type': row[0],
+                    'timestamp':   ts_ms,
+                    'mean':        _f(row[2]),
+                    'max':         _f(row[3]),
+                    'min':         _f(row[4]),
+                    'std_dev':     _f(row[5]),
+                    'range':       _f(row[6]),
+                    'variance':    _f(row[7]),
+                    'skewness':    _f(row[8]),
+                    'kurtosis':    _f(row[9]),
+                    'frequency1':  _f(row[10]),
+                    'frequency2':  _f(row[11]),
+                    'frequency3':  _f(row[12]),
+                    'frequency4':  _f(row[13]),
+                    'frequency5':  _f(row[14]),
+                    'amplitude1':  _f(row[15]),
+                    'amplitude2':  _f(row[16]),
+                    'amplitude3':  _f(row[17]),
+                    'amplitude4':  _f(row[18]),
+                    'amplitude5':  _f(row[19]),
                 })
-        
-        return {
-            'metadata': metadata,
-            'slope_data': slope_data
-        }
+
+            return {'metadata': metadata, 'trend_data': trend_data}
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                "get_event DB query failed for fault_id=%s table=%s: %s",
+                fault_id, table_name, e
+            )
+            return {'metadata': metadata, 'trend_data': [], 'error': str(e)}
     
     def get_unique_event_names(self) -> List[str]:
         """

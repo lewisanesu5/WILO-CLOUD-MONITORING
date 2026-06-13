@@ -410,8 +410,10 @@ def extract_fault_trend(
     if not records:
         return {'error': 'No records provided', 'fault_name': fault_name}
 
+    # Normalize fault_name to snake_case for FAULT_PARAMETER_WEIGHTS lookup
+    normalized_fault_name = fault_name.lower().replace(" ", "_")
     fault_weights = FAULT_PARAMETER_WEIGHTS.get(
-        fault_name,
+        normalized_fault_name,
         FAULT_PARAMETER_WEIGHTS['custom_fault']
     )
 
