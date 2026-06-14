@@ -90,7 +90,7 @@ for table in FAULT_TABLES:
         cur.close()
         continue
 
-    # 2. Table exists — check for sensor_type column
+    # 2. Table exists - check for sensor_type column
     cur.execute("""
         SELECT column_name, data_type, column_default, is_nullable
         FROM information_schema.columns

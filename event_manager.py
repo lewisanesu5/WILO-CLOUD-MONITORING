@@ -282,10 +282,10 @@ class EventManager:
         
         return nearest_idx
     
-    # _calculate_feature_slopes removed — slope computation is done inline
+    # _calculate_feature_slopes removed - slope computation is done inline
     # inside _extract_multi_sensor_trends with correct forward/backward differences.
     #
-    # _find_stable_baseline_idx removed — was a stub returning last index;
+    # _find_stable_baseline_idx removed - was a stub returning last index;
     # deviation onset is now detected dynamically in _extract_multi_sensor_trends.
     
     # Minimum number of chronological MAX-mode upload cycles required to attempt
@@ -305,11 +305,11 @@ class EventManager:
         """
         ALL_FEATURES = ['mean', 'max', 'min', 'std_dev', 'variance', 'skewness', 'kurtosis']
 
-        # ── Minimum data guard ──────────────────────────────────────────────────
+        # -- Minimum data guard --------------------------------------------------
         # Each sensor must have at least MIN_TREND_POINTS chronological rows so
         # that (a) a meaningful baseline can be established and (b) deviation from
         # that baseline can be observed.  A single snapshot row produces all-zero
-        # slopes and no detectable deviation — i.e. meaningless output.
+        # slopes and no detectable deviation - i.e. meaningless output.
         import logging as _logging
         _log = _logging.getLogger(__name__)
         insufficient = {
@@ -324,10 +324,10 @@ class EventManager:
             raise ValueError(
                 f"Insufficient data for trend extraction ({detail}). "
                 f"Need at least {self.MIN_TREND_POINTS} chronological MAX-mode upload "
-                f"cycles per sensor (currently only 1 snapshot row exists — no baseline "
+                f"cycles per sensor (currently only 1 snapshot row exists - no baseline "
                 f"comparison or deviation detection is possible)."
             )
-        # ────────────────────────────────────────────────────────────────────────
+        # ------------------------------------------------------------------------
 
         # Assume all sensors have same timestamps; use acceleration as reference
         accel_data = sensor_data.get('acceleration', [])
@@ -655,7 +655,7 @@ class EventManager:
         table_name = FAILURE_TABLE_MAPPING.get(event_name) if event_name else None
 
         if fault_id is None or table_name is None:
-            # Metadata exists but we cannot map to a table — return metadata only
+            # Metadata exists but we cannot map to a table - return metadata only
             return {'metadata': metadata, 'trend_data': []}
 
         try:

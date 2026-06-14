@@ -527,7 +527,7 @@ def insert_event_from_historical_data(failure_type, extracted_data):
         # Get next fault_id for this failure type on the active connection
         fault_id = get_next_fault_id(failure_type, conn)
         
-        # Prepare insert query — includes sensor_type
+        # Prepare insert query - includes sensor_type
         query = f"""
             INSERT INTO {table_name}
             (fault_id, sensor_type, timestamp, x_min, x_max, mean, standard_deviation,

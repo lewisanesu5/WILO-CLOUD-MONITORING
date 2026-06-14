@@ -6,7 +6,7 @@ Simulates angular/parallel shaft misalignment between motor and pump.
 Physical progression:
   Misalignment forces the shaft to flex on every revolution, creating:
     - Strong 1× rotational (parallel misalignment)
-    - Strong 2× rotational (angular misalignment — dominant symptom)
+    - Strong 2× rotational (angular misalignment - dominant symptom)
     - Sometimes 3× rotational at severe misalignment
     - Axial vibration (angular misalignment pushes/pulls axially)
     - Coupling wear → looseness → broadband noise later
@@ -58,7 +58,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     ts  = make_timestamps(datetime.now(), n, fs)
     I_r = MOTOR['rated_current_a']
 
-    # ── ACCELERATION ─────────────────────────────────────────────────────────
+    # -- ACCELERATION ---------------------------------------------------------
     accel = [MOTOR['accel_rms_g'] + random.gauss(0, 0.06) for _ in range(n)]
     rot1x = sinusoid(F_ROT, 0.15)
     accel = [accel[i] + rot1x[i] for i in range(n)]
@@ -66,8 +66,8 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     if d_accel > 0.01:
         # 1× and 2× both grow; 2× grows faster (more indicative of misalignment)
         amp_1x = d_accel * 2.0    # g
-        amp_2x = d_accel * 3.5    # g — 2× dominates in angular misalignment
-        amp_3x = d_accel * 1.0    # g — appears at severe misalignment
+        amp_2x = d_accel * 3.5    # g - 2× dominates in angular misalignment
+        amp_3x = d_accel * 1.0    # g - appears at severe misalignment
 
         vib_1x = sinusoid(F_ROT, amp_1x)
         vib_2x = sinusoid(F_2X,  amp_2x, phase=math.pi * 0.3)
@@ -83,7 +83,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
         accel = [accel[i] + random.gauss(0, d_accel * 0.20)
                  for i in range(n)]
 
-        # Axial vibration component (angular misalignment) — modelled as
+        # Axial vibration component (angular misalignment) - modelled as
         # an additional 1× with phase offset (axial plane)
         axial = sinusoid(F_ROT, d_accel * 1.8, phase=math.pi / 2)
         accel = [accel[i] + axial[i] for i in range(n)]
@@ -92,7 +92,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Accel  dev={d_accel:.3f}  '
                 f'peak={max(accel):.3f}g  rms={math.sqrt(sum(v**2 for v in accel)/n):.3f}g')
 
-    # ── CURRENT ──────────────────────────────────────────────────────────────
+    # -- CURRENT --------------------------------------------------------------
     # Cyclic load variation: misalignment causes torque to vary once/twice per revolution
     # Motor compensates by drawing varying current at 1× and 2× rotational
     current = [I_r + random.gauss(0, 2.5) for _ in range(n)]
@@ -116,7 +116,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Current dev={d_current:.3f}  '
                 f'peak={max(current):.1f}A  mean={sum(current)/n:.1f}A')
 
-    # ── AUDIO ────────────────────────────────────────────────────────────────
+    # -- AUDIO ----------------------------------------------------------------
     audio = [MOTOR['audio_db'] + random.gauss(0, 1.2) for _ in range(n)]
     h50   = sinusoid(50, 4.0)
     h100  = sinusoid(100, 1.8)
@@ -129,7 +129,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
         audio = [audio[i] + rot_whine_1x[i] + rot_whine_2x[i]
                  for i in range(n)]
 
-        # Coupling knock — impulsive at rotational frequency
+        # Coupling knock - impulsive at rotational frequency
         audio = add_impulses(audio, F_ROT, d_audio * 5.0, decay=0.55)
 
         # Overall dB rise
@@ -139,6 +139,9 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     save_max_min_csvs('audio', data_dir, ts, audio)
     logger.info(f'  Audio  dev={d_audio:.3f}  '
                 f'mean={sum(audio)/n:.2f}dB  peak={max(audio):.2f}dB')
+
+    # Motor shaft misalignment failure threshold: accel dev >= 0.80 (severe orbital imbalance)
+    return d_accel >= 0.80
 
 
 if __name__ == '__main__':

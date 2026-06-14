@@ -7,13 +7,13 @@ Physical description
 --------------------
 A stall occurs when the rotor is forced to stop or slow dramatically while the
 supply is still energised.  Back-EMF collapses → current surges to near
-Locked-Rotor Current (LRC ≈ 6.5 × FLA = ~2 438 A).
+Locked-Rotor Current (LRC ~ 6.5 × FLA = ~2 438 A).
 
 Sensor signatures
 -----------------
 Current  [LEAD, lag=0]
   • Pre-stall struggle phase: current rises as motor fights the load
-  • Full-stall phase: sustained surge to 2 000–2 500 A
+  • Full-stall phase: sustained surge to 2 000-2 500 A
   • Dominant frequency: 50 Hz (supply) locks in; sidebands vanish
   • Skewness ↑ at onset (spike shape), kurtosis ↑ during onset
   • Mean ↑↑↑ once stalled
@@ -21,12 +21,12 @@ Current  [LEAD, lag=0]
 Acceleration [lag=1]
   • Struggle phase: vibration rises (motor fighting load)
   • Full-stall: vibration DROPS (rotor stationary → no rotating imbalance)
-  • Non-monotonic — this dip is a key ML fingerprint
+  • Non-monotonic - this dip is a key ML fingerprint
   • Top frequency shifts from 12.25 Hz to 50 Hz harmonics during struggle
 
 Audio [lag=2]
   • Loud 50 Hz hum dominates
-  • Mean dB ↑↑ (up to 105–110 dB at full stall)
+  • Mean dB ↑↑ (up to 105-110 dB at full stall)
   • Harmonic content at 100 Hz, 150 Hz
 """
 
@@ -49,9 +49,9 @@ ACCEL_LAG   = random.randint(1, 3)
 AUDIO_LAG   = random.randint(2, 4)
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 # CURRENT GENERATOR
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 def generate_current(upload_num: int, onset: int,
                      data_dir: str, logger) -> None:
     """
@@ -59,9 +59,9 @@ def generate_current(upload_num: int, onset: int,
 
     Stages:
       dev_c < 0.15  → normal operation
-      0.15–0.45     → struggle: current climbs, supply-freq component grows
-      0.45–0.75     → near-stall: surge approaching LRC
-      > 0.75        → full stall: current locked at ~2 200–2 450 A
+      0.15-0.45     → struggle: current climbs, supply-freq component grows
+      0.45-0.75     → near-stall: surge approaching LRC
+      > 0.75        → full stall: current locked at ~2 200-2 450 A
     """
     dev = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.50)
     ts  = make_timestamps(datetime.now())
@@ -71,7 +71,7 @@ def generate_current(upload_num: int, onset: int,
     f_sup   = MOTOR['f_supply']                 # 50 Hz
     f_rot   = MOTOR['f_rot']                    # 12.25 Hz
 
-    # ── baseline: full-load AC current ──
+    # -- baseline: full-load AC current --
     noise_sigma = rated * 0.004
     signal = [rated + v for v in gaussian_noise(noise_sigma)]
     signal = [s + a for s, a in zip(signal,
@@ -82,7 +82,7 @@ def generate_current(upload_num: int, onset: int,
         save_max_min_csvs('current', data_dir, ts, signal)
         return
 
-    # ── struggle phase (dev 0–0.50): rising current ──
+    # -- struggle phase (dev 0-0.50): rising current --
     struggle_factor = min(dev / 0.50, 1.0)
     stall_factor    = max((dev - 0.50) / 0.50, 0.0)
 
@@ -119,17 +119,17 @@ def generate_current(upload_num: int, onset: int,
                 f'struggle={struggle_factor:.2f}  stall={stall_factor:.2f}')
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 # ACCELERATION GENERATOR
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 def generate_acceleration(upload_num: int, onset: int,
                            data_dir: str, logger) -> None:
     """
     Acceleration lags current by 1 upload.
 
-    Non-monotonic profile — key ML fingerprint:
+    Non-monotonic profile - key ML fingerprint:
       dev_a < 0.40  → vibration RISES (motor fighting load)
-      dev_a 0.40–0.60 → vibration PEAKS
+      dev_a 0.40-0.60 → vibration PEAKS
       dev_a > 0.60  → vibration DROPS toward near-zero (rotor stationary)
     """
     dev = sensor_deviation(upload_num, onset, lag=ACCEL_LAG, steepness=0.50)
@@ -148,9 +148,9 @@ def generate_acceleration(upload_num: int, onset: int,
         save_max_min_csvs('acceleration', data_dir, ts, signal)
         return
 
-    # ── struggle phase: vibration rises ──
+    # -- struggle phase: vibration rises --
     peak_factor  = min(dev / 0.40, 1.0)           # 0 → 1 during struggle
-    # ── stall phase: vibration falls back ──
+    # -- stall phase: vibration falls back --
     decay_factor = max((dev - 0.40) / 0.60, 0.0)  # 0 → 1 as rotor stops
 
     # Net vibration amplitude: rises then falls
@@ -181,9 +181,9 @@ def generate_acceleration(upload_num: int, onset: int,
                 f'peak_factor={peak_factor:.2f}  decay={decay_factor:.2f}')
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 # AUDIO GENERATOR
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 def generate_audio(upload_num: int, onset: int,
                    data_dir: str, logger) -> None:
     """
@@ -192,7 +192,7 @@ def generate_audio(upload_num: int, onset: int,
     Characteristics:
       • Loud 50 Hz fundamental hum dominates
       • Harmonics at 100 Hz, 150 Hz grow
-      • SPL rises from 82 dB to 105–110 dB at full stall
+      • SPL rises from 82 dB to 105-110 dB at full stall
       • Mean dB ↑↑, top frequency = 50 Hz
     """
     dev = sensor_deviation(upload_num, onset, lag=AUDIO_LAG, steepness=0.50)
@@ -215,7 +215,7 @@ def generate_audio(upload_num: int, onset: int,
         save_max_min_csvs('audio', data_dir, ts, signal)
         return
 
-    # SPL rises dramatically — stalled motor is very loud
+    # SPL rises dramatically - stalled motor is very loud
     max_db_rise = 26.0    # 82 → ~108 dB at full stall
     db_level    = base_db + dev * max_db_rise
 
@@ -238,23 +238,27 @@ def generate_audio(upload_num: int, onset: int,
     signal = [min(s, 115.0) for s in signal]
 
     save_max_min_csvs('audio', data_dir, ts, signal)
-    logger.info(f'  [audio]   dev={dev:.3f}  SPL≈{db_level:.1f}dB  '
+    logger.info(f'  [audio]   dev={dev:.3f}  SPL~{db_level:.1f}dB  '
                 f'hum_50={hum_50:.1f}  hum_100={hum_100:.1f}')
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 # COMBINED GENERATE FUNCTION
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 def generate_all(upload_num: int, onset: int,
-                 data_dir: str, logger) -> None:
+                 data_dir: str, logger) -> bool:
     generate_current(upload_num, onset, data_dir, logger)
     generate_acceleration(upload_num, onset, data_dir, logger)
     generate_audio(upload_num, onset, data_dir, logger)
 
+    # Motor stall failure threshold: current dev >= 0.50 (struggle -> full stall)
+    _dev = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.50)
+    return _dev >= 0.50
 
-# ─────────────────────────────────────────────
+
+# ---------------------------------------------
 # ENTRY POINT
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 if __name__ == '__main__':
     run_fault_simulation(
         fault_name    = FAULT_NAME,

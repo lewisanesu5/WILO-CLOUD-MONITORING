@@ -59,11 +59,11 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     I_r = MOTOR['rated_current_a']
     F_r = MOTOR['f_rot']
 
-    # ── CURRENT ──────────────────────────────────────────────────────────────
+    # -- CURRENT --------------------------------------------------------------
     # As temperature rises, winding resistance R increases → V = IR means
     # for constant V supply, if load is constant, I stays similar BUT
     # efficiency drops so motor draws more current to maintain output power.
-    # Net effect: gradual current rise ~10–15% above rated at thermal limit.
+    # Net effect: gradual current rise ~10-15% above rated at thermal limit.
     current = [I_r + random.gauss(0, 2.5) for _ in range(n)]
     fund    = sinusoid(50, I_r * 0.08)
     current = [current[i] + fund[i] for i in range(n)]
@@ -79,7 +79,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
 
         # Thermal trip events at high deviation
         if d_current > TRIP_THRESHOLD_DEV:
-            # Simulate 1–3 trip events within the 2-second window
+            # Simulate 1-3 trip events within the 2-second window
             n_trips = random.randint(1, 2)
             trip_width = int(0.12 * fs)     # ~120ms trip + restart transient
             for _ in range(n_trips):
@@ -97,7 +97,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Current dev={d_current:.3f}  '
                 f'peak={max(current):.1f}A  mean={sum(current)/n:.1f}A')
 
-    # ── AUDIO ────────────────────────────────────────────────────────────────
+    # -- AUDIO ----------------------------------------------------------------
     # TEFC motor: cooling fan is integral. As windings heat up:
     # - Cooling demand increases but fan speed is fixed (no variable fan)
     # - Fan noise stays but overall machine noise rises (thermal expansion rattles)
@@ -108,7 +108,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     audio = [audio[i] + h50[i] + h100[i] for i in range(n)]
 
     if d_audio > 0.01:
-        # Fan noise increase — broadband rise
+        # Fan noise increase - broadband rise
         audio = [audio[i] + d_audio * 7.0 + random.gauss(0, 1.8)
                  for i in range(n)]
 
@@ -124,7 +124,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Audio  dev={d_audio:.3f}  '
                 f'mean={sum(audio)/n:.2f}dB  peak={max(audio):.2f}dB')
 
-    # ── ACCELERATION ─────────────────────────────────────────────────────────
+    # -- ACCELERATION ---------------------------------------------------------
     # Thermal expansion of rotor/shaft → slight mass imbalance → 1× vibration
     # Also: differential thermal expansion between rotor and stator
     # → air gap asymmetry → unbalanced magnetic pull → vibration
@@ -149,6 +149,9 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     save_max_min_csvs('acceleration', data_dir, ts, accel)
     logger.info(f'  Accel  dev={d_accel:.3f}  '
                 f'peak={max(accel):.3f}g  rms={math.sqrt(sum(v**2 for v in accel)/n):.3f}g')
+
+    # Motor overheating failure threshold: current dev >= TRIP_THRESHOLD_DEV (0.75) - thermal trip
+    return d_current >= TRIP_THRESHOLD_DEV
 
 
 if __name__ == '__main__':

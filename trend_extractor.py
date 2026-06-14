@@ -1,16 +1,16 @@
 """
-trend_extractor.py  —  Upgraded trend extraction for predictive maintenance
+trend_extractor.py  -  Upgraded trend extraction for predictive maintenance
 Drop this file into your project root and call it from app.py.
 
 Key improvements over the original:
   1. Multi-parameter deviation scoring (not just mean)
   2. Per-sensor, per-fault parameter weights derived from physical signatures
-  3. Robust baseline from a configurable percentile window — not just first N points
+  3. Robust baseline from a configurable percentile window - not just first N points
   4. Z-score normalisation stored alongside raw values for model-ready features
-  5. Separate min/max file query paths — min file used for electrical fault signatures
+  5. Separate min/max file query paths - min file used for electrical fault signatures
   6. Monotonic trend slope computed per parameter (used as a training feature)
   7. Deviation window returned is the actual pre-fault trend, not a dump of all records
-  8. Fault severity score — a single float you can threshold in the model
+  8. Fault severity score - a single float you can threshold in the model
 """
 
 import numpy as np
@@ -104,7 +104,7 @@ FAULT_PARAMETER_WEIGHTS: Dict[str, List[Dict]] = {
         {'sensor': 'current',      'param': 'mean',        'weight': 0.3, 'direction': 'any'},
     ],
     'custom_fault': [
-        # Equal weight across all sensors — anomaly detection mode
+        # Equal weight across all sensors - anomaly detection mode
         {'sensor': 'acceleration', 'param': 'kurtosis',    'weight': 1.0, 'direction': 'any'},
         {'sensor': 'acceleration', 'param': 'std_dev',     'weight': 1.0, 'direction': 'any'},
         {'sensor': 'current',      'param': 'kurtosis',    'weight': 1.0, 'direction': 'any'},
@@ -221,7 +221,7 @@ def compute_trend_slopes(
         {sensor: {param: slope_per_session}}
 
     A rising kurtosis slope is more informative for a model than the raw
-    kurtosis value — it tells you the *rate of deterioration*.
+    kurtosis value - it tells you the *rate of deterioration*.
     """
     n = len(records)
     if n < 3:
@@ -384,7 +384,7 @@ def extract_fault_trend(
             One of the FAULT_PARAMETER_WEIGHTS keys, e.g. 'motor_bearing_failure'.
         pre_fault_window:
             Number of records to include *before* the detected deviation onset.
-            This is your pre-fault trend — the data the model learns to recognise.
+            This is your pre-fault trend - the data the model learns to recognise.
         baseline_fraction:
             Fraction of records to use as healthy baseline (default 20%).
         file_type_preference:
@@ -576,7 +576,7 @@ def assemble_records_from_db(
         limit:        max records per sensor table to fetch
         file_type:    'max' | 'min' | 'combined'
         include_min:  if True, also queries min file records separately
-                      and merges them — useful for electrical fault detection
+                      and merges them - useful for electrical fault detection
 
     Returns:
         List of dicts, each representing one 2-hour session:

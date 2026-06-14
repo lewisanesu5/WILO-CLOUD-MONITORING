@@ -270,7 +270,7 @@ def create_fault_event_csv(fault_name, num_intervals_before=3):
         return {"success": False, "error": str(e)}
 
 
-# save_fault_event_data removed — event data is stored exclusively in the database
+# save_fault_event_data removed - event data is stored exclusively in the database
 # via EventManager.create_event() → database.insert_event_data()
 
 # Upload security configuration
@@ -283,13 +283,13 @@ MAX_CSV_ROWS = 10000  # Reasonable for 2-second samples
 UPLOAD_FREQUENCY_MINUTES = 110  # Min 110 mins between uploads (2hr target +10min buffer)
 UPLOAD_BATCH_SIZE = 2  # Expected 2 files per upload (max and min)
 
-# ── Auto-event batch tracker ─────────────────────────────────────────────────
+# -- Auto-event batch tracker -------------------------------------------------
 # Tracks per-fault upload counts within a rolling 15-second window so that
 # when all three sensors (accel + current + audio) have been uploaded for the
 # same fault we automatically create a fault event in the database.
 _batch_lock   = threading.Lock()
-_batch_state  = {}   # {fault_name: {'count': int, 'last_ts': float}}
-_BATCH_WINDOW = 15   # seconds — window within which 3 uploads = one complete batch
+_batch_state  = {}   # {fault_name: {'count': int, 'last_ts': float, 'is_failure': bool}}
+_BATCH_WINDOW = 15   # seconds - window within which 3 uploads = one complete batch
 
 
 def _trigger_auto_event(fault_name: str) -> None:
@@ -297,7 +297,7 @@ def _trigger_auto_event(fault_name: str) -> None:
 
     Calls EventManager.create_event() so fault deviations are extracted from
     the freshly written database rows.  Errors are logged but never propagated
-    back to the generator — the upload has already succeeded.
+    back to the generator - the upload has already succeeded.
     """
     try:
         from datetime import datetime as _dt
@@ -1144,8 +1144,9 @@ def upload_files():
             logger.error(f"Failed to process and save statistics: {e}")
             return jsonify({'error': f'Failed to save statistics to database: {str(e)}'}), 500
 
-        # 5. AUTO-EVENT TRIGGER — fire when all 3 sensors of a batch are done
+        # 5. AUTO-EVENT TRIGGER - fire only when the batch is marked as failure
         fault_name_header = request.headers.get('X-Fault-Name', '').strip()
+        is_failure_header = request.headers.get('X-Fault-Failure', '').strip().lower() == 'true'
         if fault_name_header:
             now_ts = time.time()
             fire_event = False
@@ -1153,14 +1154,25 @@ def upload_files():
                 state = _batch_state.get(fault_name_header)
                 if state is None or (now_ts - state['last_ts']) > _BATCH_WINDOW:
                     # Start a fresh window
-                    _batch_state[fault_name_header] = {'count': 1, 'last_ts': now_ts}
+                    _batch_state[fault_name_header] = {
+                        'count': 1,
+                        'last_ts': now_ts,
+                        'is_failure': is_failure_header
+                    }
                 else:
                     state['count'] += 1
                     state['last_ts'] = now_ts
+                    if is_failure_header:
+                        state['is_failure'] = True
                     if state['count'] >= 3:
-                        fire_event = True
+                        if state.get('is_failure', False):
+                            fire_event = True
                         # Reset so next batch starts clean
-                        _batch_state[fault_name_header] = {'count': 0, 'last_ts': now_ts}
+                        _batch_state[fault_name_header] = {
+                            'count': 0,
+                            'last_ts': now_ts,
+                            'is_failure': False
+                        }
 
             if fire_event:
                 t = threading.Thread(
@@ -1170,7 +1182,7 @@ def upload_files():
                     name=f"auto-event-{fault_name_header}"
                 )
                 t.start()
-                logger.info("[AUTO-EVENT] Batch complete for '%s' — event thread started", fault_name_header)
+                logger.info("[AUTO-EVENT] Batch failure complete for '%s' - event thread started", fault_name_header)
 
         return jsonify({
             'status': 'success',

@@ -33,10 +33,10 @@ from base_motor import (MOTOR, N_SAMPLES, SAMPLE_RATE, TOTAL_UPLOADS,
 FAULT_NAME = 'motor_bearing_failure'
 
 # Bearing characteristic frequencies (Hz)
-BPFO = MOTOR['bpfo']   # 52.3 Hz — outer race
-BPFI = MOTOR['bpfi']   # 72.7 Hz — inner race
-BSF  = MOTOR['bsf']    #  9.1 Hz — ball spin
-FTF  = MOTOR['ftf']    #  4.4 Hz — cage
+BPFO = MOTOR['bpfo']   # 52.3 Hz - outer race
+BPFI = MOTOR['bpfi']   # 72.7 Hz - inner race
+BSF  = MOTOR['bsf']    #  9.1 Hz - ball spin
+FTF  = MOTOR['ftf']    #  4.4 Hz - cage
 
 ACCEL_LAG   = random.randint(0, 1)
 AUDIO_LAG   = random.randint(2, 4)
@@ -54,7 +54,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     now = datetime.now()
     ts  = make_timestamps(now, n, fs)
 
-    # ── ACCELERATION ────────────────────────────────────────────────────────
+    # -- ACCELERATION --------------------------------------------------------
     # Healthy: broadband vibration + 1× rotational + slight 50 Hz from supply
     accel = [MOTOR['accel_rms_g'] + random.gauss(0, 0.06) for _ in range(n)]
     rot   = sinusoid(MOTOR['f_rot'], 0.15)                 # 1× rotational
@@ -66,7 +66,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
         # At 735 RPM → ~12.25 impulses/sec at BPFO; grows with d
         impulse_rate_bpfo = BPFO * (0.05 + d_accel * 0.95)   # partial at onset
         impulse_rate_bpfi = BPFI * (0.02 + d_accel * 0.5)
-        impulse_mag_bpfo  = d_accel * 3.5   # g — grows to 3.5g at critical
+        impulse_mag_bpfo  = d_accel * 3.5   # g - grows to 3.5g at critical
         impulse_mag_bpfi  = d_accel * 1.8
 
         accel = add_impulses(accel, impulse_rate_bpfo,
@@ -87,7 +87,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Accel  dev={d_accel:.3f}  '
                 f'peak={max(accel):.3f}g  rms={math.sqrt(sum(v**2 for v in accel)/n):.3f}g')
 
-    # ── AUDIO ────────────────────────────────────────────────────────────────
+    # -- AUDIO ----------------------------------------------------------------
     # Healthy: broadband machine hum, dominant 50 Hz, harmonics
     audio = [MOTOR['audio_db'] + random.gauss(0, 1.2) for _ in range(n)]
     h50   = sinusoid(50,  4.0)    # 50 Hz fundamental
@@ -96,7 +96,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     audio = [audio[i] + h50[i] + h100[i] + h150[i] for i in range(n)]
 
     if d_audio > 0.01:
-        # High-pitched whine at BPFO and BPFI — characteristic bearing squeal
+        # High-pitched whine at BPFO and BPFI - characteristic bearing squeal
         bpfo_whine = sinusoid(BPFO, d_audio * 8.0)     # dB amplitude
         bpfi_whine = sinusoid(BPFI, d_audio * 5.0)
         bsf_whine  = sinusoid(BSF,  d_audio * 2.5)
@@ -114,7 +114,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Audio  dev={d_audio:.3f}  '
                 f'peak={max(audio):.2f}dB  mean={sum(audio)/n:.2f}dB')
 
-    # ── CURRENT ──────────────────────────────────────────────────────────────
+    # -- CURRENT --------------------------------------------------------------
     # Healthy: sinusoidal draw at 50 Hz, amplitude = rated current
     I_rated = MOTOR['rated_current_a']
     current = [I_rated + random.gauss(0, 2.5) for _ in range(n)]
@@ -123,7 +123,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
 
     if d_current > 0.01:
         # Extra friction load from damaged bearing → current increases
-        # At critical: ~8–12% above rated
+        # At critical: ~8-12% above rated
         extra_load = I_rated * d_current * 0.12
         current = [current[i] + extra_load for i in range(n)]
 
@@ -140,6 +140,8 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Current dev={d_current:.3f}  '
                 f'peak={max(current):.1f}A  mean={sum(current)/n:.1f}A')
 
+    # Motor bearing failure threshold: accel dev >= 0.80 (heavy spalling / imminent seizure)
+    return d_accel >= 0.80
 
 if __name__ == '__main__':
     run_fault_simulation(FAULT_NAME, generate,

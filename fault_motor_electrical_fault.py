@@ -39,7 +39,7 @@ SLIP        = MOTOR['slip']           # 0.02
 F_SUPPLY    = MOTOR['f_supply']       # 50 Hz
 F_SIDEBAND_LO = F_SUPPLY - 2 * SLIP * F_SUPPLY   # 48 Hz
 F_SIDEBAND_HI = F_SUPPLY + 2 * SLIP * F_SUPPLY   # 52 Hz
-F_2SLIP     = 2 * SLIP * F_SUPPLY    # 2 Hz — torque ripple
+F_2SLIP     = 2 * SLIP * F_SUPPLY    # 2 Hz - torque ripple
 F_ROT       = MOTOR['f_rot']         # 12.25 Hz
 
 CURRENT_LAG = random.randint(0, 1)
@@ -58,7 +58,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     ts  = make_timestamps(datetime.now(), n, fs)
     I_r = MOTOR['rated_current_a']
 
-    # ── CURRENT ──────────────────────────────────────────────────────────────
+    # -- CURRENT --------------------------------------------------------------
     # Healthy: 50 Hz AC draw, small harmonic distortion (THD ~3%)
     current = [I_r + random.gauss(0, 2.5) for _ in range(n)]
     fund    = sinusoid(F_SUPPLY, I_r * 0.08)   # fundamental ripple
@@ -92,7 +92,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Current dev={d_current:.3f}  '
                 f'peak={max(current):.1f}A  mean={sum(current)/n:.1f}A')
 
-    # ── AUDIO ────────────────────────────────────────────────────────────────
+    # -- AUDIO ----------------------------------------------------------------
     # Healthy: 50 Hz dominant hum + harmonics
     audio = [MOTOR['audio_db'] + random.gauss(0, 1.2) for _ in range(n)]
     h50   = sinusoid(50, 4.0)
@@ -100,7 +100,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     audio = [audio[i] + h50[i] + h100[i] for i in range(n)]
 
     if d_audio > 0.01:
-        # 100 Hz (2× supply) becomes dominant — magnetic force waves at 2× frequency
+        # 100 Hz (2× supply) becomes dominant - magnetic force waves at 2× frequency
         # In healthy motor this is small; broken bars create strong 2× component
         h100_extra = sinusoid(100, d_audio * 12.0)
         h200       = sinusoid(200, d_audio * 5.0)
@@ -119,7 +119,7 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     logger.info(f'  Audio  dev={d_audio:.3f}  '
                 f'mean={sum(audio)/n:.2f}dB  peak={max(audio):.2f}dB')
 
-    # ── ACCELERATION ─────────────────────────────────────────────────────────
+    # -- ACCELERATION ---------------------------------------------------------
     # Healthy: low broadband + 1× rotational
     accel = [MOTOR['accel_rms_g'] + random.gauss(0, 0.06) for _ in range(n)]
     rot1x = sinusoid(F_ROT, 0.15)
@@ -145,6 +145,9 @@ def generate(upload_num: int, onset: int, data_dir: str, logger):
     save_max_min_csvs('acceleration', data_dir, ts, accel)
     logger.info(f'  Accel  dev={d_accel:.3f}  '
                 f'peak={max(accel):.3f}g  rms={math.sqrt(sum(v**2 for v in accel)/n):.3f}g')
+
+    # Motor electrical fault failure threshold: current dev >= 0.80 (insulation breakdown)
+    return d_current >= 0.80
 
 
 if __name__ == '__main__':
