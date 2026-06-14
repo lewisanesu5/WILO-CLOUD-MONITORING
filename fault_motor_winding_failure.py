@@ -53,6 +53,10 @@ from base_motor import (
 
 FAULT_NAME = 'motor_winding_failure'
 
+CURRENT_LAG = random.randint(0, 1)
+AUDIO_LAG   = random.randint(1, 2)
+ACCEL_LAG   = random.randint(2, 4)
+
 
 # ─────────────────────────────────────────────
 # CURRENT GENERATOR
@@ -69,7 +73,7 @@ def generate_current(upload_num: int, onset: int,
       • Arcing impulse spikes — always positive, high kurtosis
       • Late stage: abrupt surge before protection trip
     """
-    dev = sensor_deviation(upload_num, onset, lag=0, steepness=0.44)
+    dev = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.44)
     ts  = make_timestamps(datetime.now())
 
     rated  = MOTOR['rated_current_a']     # 375 A
@@ -158,7 +162,7 @@ def generate_audio(upload_num: int, onset: int,
       • Kurtosis ↑↑ from crackle impulses
       • SPL rises moderately (82 → ~97 dB at critical)
     """
-    dev = sensor_deviation(upload_num, onset, lag=1, steepness=0.44)
+    dev = sensor_deviation(upload_num, onset, lag=AUDIO_LAG, steepness=0.44)
     ts  = make_timestamps(datetime.now())
 
     base_db = MOTOR['audio_db']    # 82 dB
@@ -221,7 +225,7 @@ def generate_acceleration(upload_num: int, onset: int,
       • Range ↑, kurtosis ↑ from torque shocks at arc events
       • Overall RMS rise moderate compared to vibration anomaly fault
     """
-    dev = sensor_deviation(upload_num, onset, lag=3, steepness=0.44)
+    dev = sensor_deviation(upload_num, onset, lag=ACCEL_LAG, steepness=0.44)
     ts  = make_timestamps(datetime.now())
 
     base_g = MOTOR['accel_rms_g']    # 0.50 g

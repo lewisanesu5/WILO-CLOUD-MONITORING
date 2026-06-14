@@ -55,6 +55,10 @@ from base_motor import (
 
 FAULT_NAME = 'pump_seal_leakage'
 
+AUDIO_LAG   = random.randint(0, 1)
+CURRENT_LAG = random.randint(1, 3)
+ACCEL_LAG   = random.randint(3, 5)
+
 # Fluid spray frequency characteristics
 F_SPRAY_LOW  = 160.0   # Hz — fluid spray broadband low end
 F_SPRAY_MID  = 240.0   # Hz — fluid spray broadband mid
@@ -77,7 +81,7 @@ def generate_audio(upload_num: int, onset: int,
       Stream (dev > 0.6):   loud continuous spray, broadband floor elevated,
                              air ingress crackle begins
     """
-    dev = sensor_deviation(upload_num, onset, lag=0, steepness=0.41)
+    dev = sensor_deviation(upload_num, onset, lag=AUDIO_LAG, steepness=0.41)
     ts  = make_timestamps(datetime.now())
 
     base_db = MOTOR['audio_db']    # 82 dB
@@ -157,7 +161,7 @@ def generate_current(upload_num: int, onset: int,
     The drop magnitude and then range increase is the clearest ML differentiator
     between seal leakage and all other faults.
     """
-    dev = sensor_deviation(upload_num, onset, lag=1, steepness=0.41)
+    dev = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.41)
     ts  = make_timestamps(datetime.now())
 
     rated = MOTOR['rated_current_a']    # 375 A
@@ -238,7 +242,7 @@ def generate_acceleration(upload_num: int, onset: int,
       • Stage 3: hydraulic imbalance → 1× rotational grows
       • Overall: slowest and mildest acceleration response of all 11 faults
     """
-    dev = sensor_deviation(upload_num, onset, lag=3, steepness=0.41)
+    dev = sensor_deviation(upload_num, onset, lag=ACCEL_LAG, steepness=0.41)
     ts  = make_timestamps(datetime.now())
 
     base_g = MOTOR['accel_rms_g']    # 0.50 g

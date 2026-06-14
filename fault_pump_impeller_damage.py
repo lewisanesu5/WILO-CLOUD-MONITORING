@@ -64,6 +64,10 @@ from base_motor import (
 
 FAULT_NAME = 'pump_impeller_damage'
 
+ACCEL_LAG   = random.randint(0, 1)
+AUDIO_LAG   = random.randint(0, 1)
+CURRENT_LAG = random.randint(3, 5)
+
 F_BPF  = MOTOR['bpf']       # 73.5 Hz — blade pass frequency
 F_ROT  = MOTOR['f_rot']     # 12.25 Hz — 1× rotational
 F_2ROT = MOTOR['f_2x']      # 24.50 Hz — 2× rotational
@@ -84,7 +88,7 @@ def generate_acceleration(upload_num: int, onset: int,
       dev 0.55–0.80 : 2× BPF harmonic appears
       dev > 0.80    : Broadband floor rises (fragmented blade causes chaotic flow)
     """
-    dev = sensor_deviation(upload_num, onset, lag=0, steepness=0.43)
+    dev = sensor_deviation(upload_num, onset, lag=ACCEL_LAG, steepness=0.43)
     ts  = make_timestamps(datetime.now())
 
     base_g = MOTOR['accel_rms_g']    # 0.50 g
@@ -159,7 +163,7 @@ def generate_audio(upload_num: int, onset: int,
       • SPL rises moderately
       • At severe stage: fluid noise adds broadband content
     """
-    dev = sensor_deviation(upload_num, onset, lag=0, steepness=0.43)
+    dev = sensor_deviation(upload_num, onset, lag=AUDIO_LAG, steepness=0.43)
     ts  = make_timestamps(datetime.now())
 
     base_db = MOTOR['audio_db']    # 82 dB
@@ -229,7 +233,7 @@ def generate_current(upload_num: int, onset: int,
       • Mean current drops slightly (impeller efficiency degraded)
       • Range ↑ (load pulsation grows)
     """
-    dev = sensor_deviation(upload_num, onset, lag=4, steepness=0.43)
+    dev = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.43)
     ts  = make_timestamps(datetime.now())
 
     rated = MOTOR['rated_current_a']    # 375 A

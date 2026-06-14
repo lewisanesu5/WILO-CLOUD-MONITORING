@@ -52,6 +52,10 @@ from base_motor import (
 
 FAULT_NAME = 'motor_vibration_anomaly'
 
+ACCEL_LAG   = random.randint(0, 1)
+AUDIO_LAG   = random.randint(1, 3)
+CURRENT_LAG = random.randint(2, 4)
+
 # Structural resonance frequency (motor frame natural frequency)
 # Typical for 355-frame TEFC on steel baseplate
 F_RESONANCE_1 = 38.5   # Hz — first bending mode
@@ -74,7 +78,7 @@ def generate_acceleration(upload_num: int, onset: int,
       • Kurtosis ↑ early (burst character), then stabilises at high level
       • By upload 50: RMS ~4–6× baseline, highly erratic
     """
-    dev = sensor_deviation(upload_num, onset, lag=0, steepness=0.42)
+    dev = sensor_deviation(upload_num, onset, lag=ACCEL_LAG, steepness=0.42)
     ts  = make_timestamps(datetime.now())
 
     base_g = MOTOR['accel_rms_g']    # 0.50 g
@@ -157,7 +161,7 @@ def generate_audio(upload_num: int, onset: int,
       • Kurtosis ↑ due to impulsive knocking character
       • No single dominant frequency (key differentiator)
     """
-    dev = sensor_deviation(upload_num, onset, lag=2, steepness=0.42)
+    dev = sensor_deviation(upload_num, onset, lag=AUDIO_LAG, steepness=0.42)
     ts  = make_timestamps(datetime.now())
 
     base_db = MOTOR['audio_db']    # 82 dB
@@ -215,7 +219,7 @@ def generate_current(upload_num: int, onset: int,
       • No strong spectral component — key ML differentiator from misalignment
       • Slight variance increase due to coupling irregularities
     """
-    dev = sensor_deviation(upload_num, onset, lag=3, steepness=0.42)
+    dev = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.42)
     ts  = make_timestamps(datetime.now())
 
     rated  = MOTOR['rated_current_a']    # 375 A

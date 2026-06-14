@@ -283,6 +283,38 @@ MAX_CSV_ROWS = 10000  # Reasonable for 2-second samples
 UPLOAD_FREQUENCY_MINUTES = 110  # Min 110 mins between uploads (2hr target +10min buffer)
 UPLOAD_BATCH_SIZE = 2  # Expected 2 files per upload (max and min)
 
+# ── Auto-event batch tracker ─────────────────────────────────────────────────
+# Tracks per-fault upload counts within a rolling 15-second window so that
+# when all three sensors (accel + current + audio) have been uploaded for the
+# same fault we automatically create a fault event in the database.
+_batch_lock   = threading.Lock()
+_batch_state  = {}   # {fault_name: {'count': int, 'last_ts': float}}
+_BATCH_WINDOW = 15   # seconds — window within which 3 uploads = one complete batch
+
+
+def _trigger_auto_event(fault_name: str) -> None:
+    """Run in a background daemon thread after a complete 3-sensor batch.
+
+    Calls EventManager.create_event() so fault deviations are extracted from
+    the freshly written database rows.  Errors are logged but never propagated
+    back to the generator — the upload has already succeeded.
+    """
+    try:
+        from datetime import datetime as _dt
+        failure_time = _dt.now().isoformat()
+        logger.info("[AUTO-EVENT] Creating event for fault=%s at %s", fault_name, failure_time)
+        result = event_manager.create_event(fault_name, failure_time, description="auto")
+        if result.get("success"):
+            logger.info(
+                "[AUTO-EVENT] ✓ fault_id=%s  rows=%s",
+                result.get("fault_id"), result.get("total_rows_inserted", 0)
+            )
+        else:
+            logger.warning("[AUTO-EVENT] ✗ %s", result.get("error", "unknown error"))
+    except Exception as exc:
+        logger.error("[AUTO-EVENT] Exception: %s", exc, exc_info=True)
+
+
 def load_csv_data(filename):
     """Load CSV data and return timestamps, values, and file modified timestamp (ISO).
 
@@ -1100,18 +1132,46 @@ def upload_files():
             db_start = time.time()
             process_results = process_uploaded_csv_and_save_to_db(uploaded_files)
             db_time = time.time() - db_start
-            
+
             processed_count = sum(
                 1 for mode_data in process_results.values()
                 for success in mode_data.values()
                 if success
             )
-            
+
             logger.info(f"✓ Processed and saved {processed_count} sensor statistics to database in {db_time*1000:.1f}ms from {sensor_id}")
         except Exception as e:
             logger.error(f"Failed to process and save statistics: {e}")
             return jsonify({'error': f'Failed to save statistics to database: {str(e)}'}), 500
-        
+
+        # 5. AUTO-EVENT TRIGGER — fire when all 3 sensors of a batch are done
+        fault_name_header = request.headers.get('X-Fault-Name', '').strip()
+        if fault_name_header:
+            now_ts = time.time()
+            fire_event = False
+            with _batch_lock:
+                state = _batch_state.get(fault_name_header)
+                if state is None or (now_ts - state['last_ts']) > _BATCH_WINDOW:
+                    # Start a fresh window
+                    _batch_state[fault_name_header] = {'count': 1, 'last_ts': now_ts}
+                else:
+                    state['count'] += 1
+                    state['last_ts'] = now_ts
+                    if state['count'] >= 3:
+                        fire_event = True
+                        # Reset so next batch starts clean
+                        _batch_state[fault_name_header] = {'count': 0, 'last_ts': now_ts}
+
+            if fire_event:
+                t = threading.Thread(
+                    target=_trigger_auto_event,
+                    args=(fault_name_header,),
+                    daemon=True,
+                    name=f"auto-event-{fault_name_header}"
+                )
+                t.start()
+                logger.info("[AUTO-EVENT] Batch complete for '%s' — event thread started", fault_name_header)
+
         return jsonify({
             'status': 'success',
             'message': f'Processed {len(uploaded_files)} file(s) and saved statistics to database',
@@ -1122,7 +1182,7 @@ def upload_files():
             'database_records_saved': processed_count,
             'next_expected_upload': (dt.datetime.now() + dt.timedelta(minutes=120)).isoformat()
         }), 201
-        
+
     except Exception as e:
         logger.error(f'Upload endpoint error: {str(e)}')
         return jsonify({'status': 'error', 'message': str(e)}), 500

@@ -58,6 +58,10 @@ from base_motor import (
 
 FAULT_NAME = 'pump_cavitation'
 
+AUDIO_LAG   = random.randint(0, 1)
+ACCEL_LAG   = random.randint(1, 3)
+CURRENT_LAG = random.randint(3, 5)
+
 # Cavitation characteristic frequency bands (within 700 Hz capture range)
 F_CAVITATION_LOW  = 120.0   # Hz — low end of bubble collapse envelope
 F_CAVITATION_MID  = 220.0   # Hz — mid band
@@ -72,6 +76,7 @@ def generate_audio(upload_num: int, onset: int,
     """
     Audio leads with lag=0.
 
+
     Key signatures:
       Incipient (dev 0–0.30):
         • Occasional crackle bursts — high kurtosis, low mean dB
@@ -85,7 +90,7 @@ def generate_audio(upload_num: int, onset: int,
         • Loud continuous hiss — kurtosis drops (more continuous, less impulsive)
         • Mean dB peaks (~100 dB) — large vapour cavity radiating noise
     """
-    dev = sensor_deviation(upload_num, onset, lag=0, steepness=0.43)
+    dev = sensor_deviation(upload_num, onset, lag=AUDIO_LAG, steepness=0.43)
     ts  = make_timestamps(datetime.now())
 
     base_db = MOTOR['audio_db']    # 82 dB
@@ -162,7 +167,7 @@ def generate_acceleration(upload_num: int, onset: int,
       • Skewness ↑ (collapse shock waves are compressive — one-sided)
       • RMS growth is moderate compared to kurtosis growth
     """
-    dev = sensor_deviation(upload_num, onset, lag=2, steepness=0.43)
+    dev = sensor_deviation(upload_num, onset, lag=ACCEL_LAG, steepness=0.43)
     ts  = make_timestamps(datetime.now())
 
     base_g = MOTOR['accel_rms_g']    # 0.50 g
@@ -245,7 +250,7 @@ def generate_current(upload_num: int, onset: int,
     This downward current trend combined with high audio kurtosis is the
     definitive cavitation fingerprint for the ML model.
     """
-    dev = sensor_deviation(upload_num, onset, lag=4, steepness=0.43)
+    dev = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.43)
     ts  = make_timestamps(datetime.now())
 
     rated  = MOTOR['rated_current_a']    # 375 A

@@ -44,6 +44,10 @@ from base_motor import (
 
 FAULT_NAME = 'motor_stall'
 
+CURRENT_LAG = random.randint(0, 1)
+ACCEL_LAG   = random.randint(1, 3)
+AUDIO_LAG   = random.randint(2, 4)
+
 
 # ─────────────────────────────────────────────
 # CURRENT GENERATOR
@@ -59,7 +63,7 @@ def generate_current(upload_num: int, onset: int,
       0.45–0.75     → near-stall: surge approaching LRC
       > 0.75        → full stall: current locked at ~2 200–2 450 A
     """
-    dev = sensor_deviation(upload_num, onset, lag=0, steepness=0.50)
+    dev = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.50)
     ts  = make_timestamps(datetime.now())
 
     rated   = MOTOR['rated_current_a']          # 375 A
@@ -128,7 +132,7 @@ def generate_acceleration(upload_num: int, onset: int,
       dev_a 0.40–0.60 → vibration PEAKS
       dev_a > 0.60  → vibration DROPS toward near-zero (rotor stationary)
     """
-    dev = sensor_deviation(upload_num, onset, lag=1, steepness=0.50)
+    dev = sensor_deviation(upload_num, onset, lag=ACCEL_LAG, steepness=0.50)
     ts  = make_timestamps(datetime.now())
 
     base_accel = MOTOR['accel_rms_g']    # 0.50 g
@@ -191,7 +195,7 @@ def generate_audio(upload_num: int, onset: int,
       • SPL rises from 82 dB to 105–110 dB at full stall
       • Mean dB ↑↑, top frequency = 50 Hz
     """
-    dev = sensor_deviation(upload_num, onset, lag=2, steepness=0.50)
+    dev = sensor_deviation(upload_num, onset, lag=AUDIO_LAG, steepness=0.50)
     ts  = make_timestamps(datetime.now())
 
     base_db = MOTOR['audio_db']    # 82 dB

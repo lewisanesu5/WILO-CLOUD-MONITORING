@@ -219,15 +219,19 @@ def save_max_min_csvs(sensor_name: str, data_dir: str,
 # ─────────────────────────────────────────────
 class RemoteUploadClient:
     def __init__(self, server_url=SERVER_URL, api_key=API_KEY,
-                 sensor_id=SENSOR_ID, logger=None):
-        self.server_url = server_url.rstrip('/')
-        self.api_key    = api_key
-        self.sensor_id  = sensor_id
-        self.session    = requests.Session()
-        self.logger     = logger or logging.getLogger(__name__)
+                 sensor_id=SENSOR_ID, fault_name: str = '', logger=None):
+        self.server_url  = server_url.rstrip('/')
+        self.api_key     = api_key
+        self.sensor_id   = sensor_id
+        self.fault_name  = fault_name   # forwarded as X-Fault-Name header
+        self.session     = requests.Session()
+        self.logger      = logger or logging.getLogger(__name__)
 
     def _headers(self):
-        return {'X-API-Key': self.api_key}
+        h = {'X-API-Key': self.api_key}
+        if self.fault_name:
+            h['X-Fault-Name'] = self.fault_name
+        return h
 
     def check_health(self) -> bool:
         try:
@@ -318,12 +322,18 @@ def backup_existing(data_dir: str, logger: logging.Logger):
 # ─────────────────────────────────────────────
 def run_fault_simulation(fault_name: str,
                           generate_fn,
-                          sleep_seconds: int = 30,
+                          sleep_seconds: int = 3,
                           data_dir: str = LOCAL_DATA_DIR):
     """
     Generic simulation loop.
     generate_fn(upload_num, onset, data_dir, logger) must write all 6 CSV files.
+    After every complete 3-sensor batch the server automatically creates a fault
+    event via the X-Fault-Name header — no manual trigger required.
+    Inter-batch sleep defaults to 3 seconds.
     """
+    # Force sleep_seconds to 3 for all uploads to meet the lag interval requirement
+    sleep_seconds = 3
+
     logger = setup_logger(fault_name)
     logger.info('=' * 60)
     logger.info(f'Fault Simulation: {fault_name.upper()}')
@@ -333,7 +343,7 @@ def run_fault_simulation(fault_name: str,
     os.makedirs(data_dir, exist_ok=True)
     backup_existing(data_dir, logger)
 
-    client = RemoteUploadClient(logger=logger)
+    client = RemoteUploadClient(fault_name=fault_name, logger=logger)
     if client.check_health():
         logger.info('[READY] Server reachable')
     else:

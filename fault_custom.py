@@ -63,6 +63,11 @@ from base_motor import (
 
 FAULT_NAME = 'custom_fault'
 
+AUDIO_LAG   = random.randint(0, 1)
+CURRENT_LAG = random.randint(1, 2)
+ACCEL_LAG   = random.randint(2, 3)
+THERMAL_LAG = random.randint(6, 10)
+
 # Cavitation frequency bands
 F_CAVITATION_LOW  = 120.0
 F_CAVITATION_MID  = 220.0
@@ -86,10 +91,10 @@ def generate_audio(upload_num: int, onset: int,
     continuous thermal noise fills in between crackle events.
     """
     # Cavitation develops from main onset
-    dev_cav = sensor_deviation(upload_num, onset, lag=0, steepness=0.43)
-    # Overheating thermal onset is delayed 8 uploads after cavitation onset
-    thermal_onset = onset + 8
-    dev_heat = sensor_deviation(upload_num, thermal_onset, lag=0, steepness=0.35)
+    dev_cav = sensor_deviation(upload_num, onset, lag=AUDIO_LAG, steepness=0.43)
+    # Overheating thermal onset is delayed by THERMAL_LAG uploads after cavitation onset
+    thermal_onset = onset + THERMAL_LAG
+    dev_heat = sensor_deviation(upload_num, thermal_onset, lag=AUDIO_LAG, steepness=0.35)
 
     ts = make_timestamps(datetime.now())
 
@@ -175,9 +180,9 @@ def generate_current(upload_num: int, onset: int,
              but remains above normal due to thermal resistance increase
              — ambiguous mean level with very high variance
     """
-    dev_cav  = sensor_deviation(upload_num, onset, lag=1, steepness=0.43)
-    thermal_onset = onset + 8
-    dev_heat = sensor_deviation(upload_num, thermal_onset, lag=1, steepness=0.35)
+    dev_cav  = sensor_deviation(upload_num, onset, lag=CURRENT_LAG, steepness=0.43)
+    thermal_onset = onset + THERMAL_LAG
+    dev_heat = sensor_deviation(upload_num, thermal_onset, lag=CURRENT_LAG, steepness=0.35)
 
     ts = make_timestamps(datetime.now())
 
@@ -251,9 +256,9 @@ def generate_acceleration(upload_num: int, onset: int,
     as distinct from pure cavitation (no 1× growth) and pure overheating
     (no broadband kurtosis).
     """
-    dev_cav  = sensor_deviation(upload_num, onset, lag=2, steepness=0.43)
-    thermal_onset = onset + 8
-    dev_heat = sensor_deviation(upload_num, thermal_onset, lag=2, steepness=0.35)
+    dev_cav  = sensor_deviation(upload_num, onset, lag=ACCEL_LAG, steepness=0.43)
+    thermal_onset = onset + THERMAL_LAG
+    dev_heat = sensor_deviation(upload_num, thermal_onset, lag=ACCEL_LAG, steepness=0.35)
 
     ts = make_timestamps(datetime.now())
 
