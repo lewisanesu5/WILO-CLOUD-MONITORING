@@ -1,0 +1,46 @@
+{
+  "event_id": "Motor_Shaft_Misalignment_20260615_053651",
+  "event_name": "Motor Shaft Misalignment",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-15T05:36:51.717384",
+  "failure_timestamp_ms": 1781482011717.384,
+  "actual_data_time_iso": "2026-06-15T05:36:51.717384",
+  "time_before_failure_seconds": 47.33209399414063,
+  "total_data_points_all_sensors": 39,
+  "fault_id_in_database": 28,
+  "rows_per_sensor": {
+    "acceleration": 13,
+    "current": 13,
+    "audio": 13
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 13,
+      "max_value": 0.9101374898087546,
+      "min_value": 0.6090345699265198,
+      "avg_value": 0.7720445076507425,
+      "max_slope": 0.008977163362862632,
+      "min_slope": 0.000913415871998711,
+      "avg_slope": 0.006440559633179754
+    },
+    "current": {
+      "data_points": 13,
+      "max_value": 57.899332775547414,
+      "min_value": 19.98206731347476,
+      "avg_value": 28.000865074186887,
+      "max_slope": 5.990015165313229,
+      "min_slope": 0.24366960843676486,
+      "avg_slope": 0.7355052116869799
+    },
+    "audio": {
+      "data_points": 13,
+      "max_value": 92.02074582179195,
+      "min_value": 88.056946171733,
+      "avg_value": 89.98965356420919,
+      "max_slope": 0.1109947124455892,
+      "min_slope": 0.05859766835224417,
+      "avg_slope": 0.08500811172273699
+    }
+  },
+  "created_at": "2026-06-15T05:37:02.655696"
+}

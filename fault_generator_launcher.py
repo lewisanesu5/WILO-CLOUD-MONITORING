@@ -54,7 +54,7 @@ def main():
     GeneratorClass = FAULT_GENERATOR_MAP[fault_name]
     
     # Instantiate and run
-    generator = GeneratorClass(fault_name)
+    generator = GeneratorClass()
     print(f"Started {fault_name} generator")
     sys.stdout.flush()
     

@@ -27,10 +27,42 @@ FAILURE_TABLE_MAPPING = {
     'Custom Event': 'custom_fault'
 }
 
+class ConnectionWrapper:
+    """Wrapper to prevent closing the shared database connection during bulk operations"""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        # Do not close when reusing connection during bulk events generation
+        if os.getenv('REUSE_CONNECTION') == 'true':
+            pass
+        else:
+            self._conn.close()
+
+    def real_close(self):
+        """Cleanly close the underlying connection on bulk process exit"""
+        self._conn.close()
+
+_GLOBAL_CONN = None
+
 def get_connection():
-    """Get database connection with timeout"""
+    """Get database connection with timeout, supporting global reuse when enabled"""
+    global _GLOBAL_CONN
+    if os.getenv('REUSE_CONNECTION') == 'true':
+        try:
+            if _GLOBAL_CONN is not None and _GLOBAL_CONN._conn.closed == 0:
+                return _GLOBAL_CONN
+        except Exception:
+            pass
+
     try:
         conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
+        if os.getenv('REUSE_CONNECTION') == 'true':
+            _GLOBAL_CONN = ConnectionWrapper(conn)
+            return _GLOBAL_CONN
         return conn
     except psycopg2.OperationalError as e:
         logger.error(f"Database connection error (operational): {e}")

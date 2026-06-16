@@ -1,0 +1,46 @@
+{
+  "event_id": "Motor_Winding_Failure_20260615_071910",
+  "event_name": "Motor Winding Failure",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-15T07:19:10.042723",
+  "failure_timestamp_ms": 1781488150042.723,
+  "actual_data_time_iso": "2026-06-15T07:19:10.042723",
+  "time_before_failure_seconds": 38.683071044921874,
+  "total_data_points_all_sensors": 33,
+  "fault_id_in_database": 27,
+  "rows_per_sensor": {
+    "acceleration": 11,
+    "current": 11,
+    "audio": 11
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 11,
+      "max_value": 2.4543675782254417,
+      "min_value": 1.218109527693993,
+      "avg_value": 1.8831559404578906,
+      "max_slope": 0.044100410895177064,
+      "min_slope": 0.004537150900864324,
+      "avg_slope": 0.031949615699803265
+    },
+    "current": {
+      "data_points": 11,
+      "max_value": 69.94435141323592,
+      "min_value": 21.32627432387681,
+      "avg_value": 31.600530670337005,
+      "max_slope": 9.290902878425667,
+      "min_slope": 0.2992594811444987,
+      "avg_slope": 1.2604291983550715
+    },
+    "audio": {
+      "data_points": 11,
+      "max_value": 114.70580823335959,
+      "min_value": 92.10756874190928,
+      "avg_value": 103.29816297713374,
+      "max_slope": 0.7349210342444604,
+      "min_slope": 0.14322436066110383,
+      "avg_slope": 0.5844755114759473
+    }
+  },
+  "created_at": "2026-06-15T07:19:19.527720"
+}

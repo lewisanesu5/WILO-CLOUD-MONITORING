@@ -139,16 +139,34 @@ class EventManager:
         all_points.sort(key=lambda x: x[0])
         return all_points
     
-    def _load_all_sensor_data(self) -> Dict[str, List[Dict]]:
+    # -- Fault classification for intelligent deviation detection ----------------
+    # SUDDEN: flat baseline until one catastrophic interval; deviation IS the failure.
+    # GRADUAL: progressive degradation; 3-sigma scan finds the onset reliably.
+    FAULT_TYPES = {
+        'Motor Stall':            'SUDDEN',
+        'Pump Cavitation':        'SUDDEN',
+        'Pump Impeller Damage':   'SUDDEN',
+        'Pump Seal Leakage':      'SUDDEN',
+        'Motor Bearing Failure':  'GRADUAL',
+        'Motor Shaft Misalignment': 'GRADUAL',
+        'Motor Overheating':      'GRADUAL',
+        'Motor Winding Failure':  'GRADUAL',
+        'Motor Vibration Anomaly': 'GRADUAL',
+        'Motor Electrical Fault': 'GRADUAL',
+        'Custom Event':           'GRADUAL',
+    }
+
+    def _load_all_sensor_data(self, start_time_iso: Optional[str] = None) -> Dict[str, List[Dict]]:
         """
         Load aggregated feature data for ALL sensors from database tables.
-        Queries acceleration, current, and audio tables for last 24 hours.
-        
+        If start_time_iso is provided, fetches only records created since then (representing the current generator run).
+        Otherwise, defaults to fetching the last 30 MAX-mode rows per sensor.
+
         Returns:
             Dict mapping sensor names to lists of feature data:
             {
                 'acceleration': [
-                    {'timestamp': created_at, 'mean': val, 'max': val, 'min': val, 
+                    {'timestamp': created_at, 'mean': val, 'max': val, 'min': val,
                      'std_dev': val, 'variance': val, 'skewness': val, 'kurtosis': val,
                      'frequency1-5': [...], 'amplitude1-5': [...]},
                     ...
@@ -158,41 +176,61 @@ class EventManager:
             }
         """
         from database import get_connection
-        from datetime import datetime, timedelta
         import logging
-        
+
         logger = logging.getLogger(__name__)
-        
+
         sensor_data = {'acceleration': [], 'current': [], 'audio': []}
         table_names = {
             'acceleration': 'acceleration',
             'current': 'current',
             'audio': 'audio'
         }
-        
-        logger.info(f"🔍 Querying database for all available data (no time filter)")
-        
+
+        LIMIT = 30
+        if start_time_iso:
+            logger.info(f"🔍 Querying database for records created since start_time={start_time_iso}")
+        else:
+            logger.info(f"🔍 Querying database for last {LIMIT} MAX rows per sensor")
+
         try:
             conn = get_connection()
             cur = conn.cursor()
-            
+
             for sensor_type, table_name in table_names.items():
                 try:
-                    # Query ALL MAX file_type data, ordered by created_at ASC (chronological)
-                    query = f"""
-                        SELECT 
-                            x_min, x_max, mean, standard_deviation, range,
-                            skewness, kurtosis,
-                            frequency1, frequency2, frequency3, frequency4, frequency5,
-                            amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
-                            created_at, file_type
-                        FROM {table_name}
-                        WHERE file_type = 'max'
-                        ORDER BY created_at ASC
-                    """
-                    
-                    logger.debug(f"Executing query for {sensor_type}: {query}")
-                    cur.execute(query)
+                    if start_time_iso:
+                        query = f"""
+                            SELECT
+                                x_min, x_max, mean, standard_deviation, range,
+                                skewness, kurtosis,
+                                frequency1, frequency2, frequency3, frequency4, frequency5,
+                                amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
+                                created_at, file_type
+                            FROM {table_name}
+                            WHERE file_type = 'max' AND created_at >= %s
+                            ORDER BY created_at ASC
+                        """
+                        logger.debug(f"Executing filtered query since {start_time_iso} for {sensor_type}")
+                        cur.execute(query, (start_time_iso,))
+                    else:
+                        query = f"""
+                            SELECT * FROM (
+                                SELECT
+                                    x_min, x_max, mean, standard_deviation, range,
+                                    skewness, kurtosis,
+                                    frequency1, frequency2, frequency3, frequency4, frequency5,
+                                    amplitude1, amplitude2, amplitude3, amplitude4, amplitude5,
+                                    created_at, file_type
+                                FROM {table_name}
+                                WHERE file_type = 'max'
+                                ORDER BY created_at DESC
+                                LIMIT %s
+                            ) sub
+                            ORDER BY created_at ASC
+                        """
+                        logger.debug(f"Executing fallback query for {sensor_type}")
+                        cur.execute(query, (LIMIT,))
                     rows = cur.fetchall()
                     
                     logger.info(f"✓ Query returned {len(rows)} {sensor_type} records from database")
@@ -293,25 +331,34 @@ class EventManager:
     # against, deviation detection is impossible, and all slopes are 0.
     MIN_TREND_POINTS = 5
 
-    def _extract_multi_sensor_trends(self, sensor_data: Dict, failure_time_ms: Optional[float] = None) -> Dict[str, List[Dict]]:
+    def _extract_multi_sensor_trends(self, sensor_data: Dict, failure_time_ms: Optional[float] = None, fault_name: Optional[str] = None) -> Dict[str, List[Dict]]:
         """
         Extract trend data for all sensors.
-        Dynamically detects when a statistical feature first starts to deviate from its normal
-        baseline.  Extracts exactly 3 normal baseline points followed by the deviation ramp
-        leading to failure.
 
-        Raises ValueError if any sensor has fewer than MIN_TREND_POINTS data points,
-        because trend analysis requires a baseline period plus observable deviation.
+        For SUDDEN faults (Motor Stall, Pump Cavitation, …) the deviation IS the failure
+        event — there is no gradual ramp.  We skip the 3-sigma scan and set the deviation
+        start to the failure interval directly, capturing 3 baseline points before it.
+
+        For GRADUAL faults (Bearing Failure, Overheating, …) we run the 3-sigma
+        statistical scan to find when the trend first leaves the normal baseline.
+
+        Raises ValueError if any sensor has fewer than MIN_TREND_POINTS data points.
+
+        Args:
+            sensor_data:      {sensor_name: [feature_dict, ...]}
+            failure_time_ms:  epoch-ms timestamp of the failure event (optional)
+            fault_name:       fault name string used to classify SUDDEN vs GRADUAL
         """
         ALL_FEATURES = ['mean', 'max', 'min', 'std_dev', 'variance', 'skewness', 'kurtosis']
 
-        # -- Minimum data guard --------------------------------------------------
-        # Each sensor must have at least MIN_TREND_POINTS chronological rows so
-        # that (a) a meaningful baseline can be established and (b) deviation from
-        # that baseline can be observed.  A single snapshot row produces all-zero
-        # slopes and no detectable deviation - i.e. meaningless output.
         import logging as _logging
         _log = _logging.getLogger(__name__)
+
+        # Classify the fault
+        fault_category = self.FAULT_TYPES.get(fault_name or '', 'GRADUAL')
+        _log.info(f"🎯 Fault classification: '{fault_name}' → {fault_category}")
+
+        # -- Minimum data guard --------------------------------------------------
         insufficient = {
             s: len(sensor_data.get(s, []))
             for s in ['acceleration', 'current', 'audio']
@@ -366,112 +413,136 @@ class EventManager:
                     std_val = 0.0
                 baselines[sensor_type][feature] = (mean_val, std_val)
 
-        # Detect the first index 'd' where any statistical feature starts behaving abnormally.
-        deviation_idx = None
-        for i in range(baseline_size, failure_idx + 1):
-            for sensor_type in ['acceleration', 'current', 'audio']:
-                if sensor_type not in sensor_data or i >= len(sensor_data[sensor_type]):
-                    continue
-                point = sensor_data[sensor_type][i]
-                for feature in ALL_FEATURES:
-                    val = point.get(feature)
-                    if val is None:
+        import logging as _logger_mod
+        _logger = _logger_mod.getLogger(__name__)
+
+        if fault_category == 'SUDDEN':
+            # -----------------------------------------------------------------
+            # SUDDEN faults: flat baseline → instant spike at failure point.
+            # The 3-sigma scan would never find a pre-failure deviation because
+            # there is none.  We set deviation_idx = failure_idx so we capture
+            # exactly 3 normal baseline points + the failure point.
+            # -----------------------------------------------------------------
+            deviation_idx = failure_idx
+            _logger.info(
+                f"⚡ SUDDEN fault — using failure_idx={failure_idx} as deviation start. "
+                f"Will extract 3 baseline + 1 failure = 4 rows per sensor."
+            )
+        else:
+            # -----------------------------------------------------------------
+            # GRADUAL faults: scan forward from baseline_size looking for the
+            # first point where any feature crosses 3-sigma from baseline.
+            # -----------------------------------------------------------------
+            deviation_idx = None
+            for i in range(baseline_size, failure_idx + 1):
+                for sensor_type in ['acceleration', 'current', 'audio']:
+                    if sensor_type not in sensor_data or i >= len(sensor_data[sensor_type]):
                         continue
-                    b_mean, b_std = baselines[sensor_type].get(feature, (0.0, 0.0))
-                    
-                    # Establish an adaptive threshold (3.0 * std, or at least 5% of mean, with a tiny fallback floor to avoid noise on absolute zero)
-                    threshold = max(3.0 * b_std, 0.05 * abs(b_mean))
-                    if threshold < 1e-5:
-                        threshold = 1e-5
-                    
-                    if abs(val - b_mean) > threshold:
-                        deviation_idx = i
+                    point = sensor_data[sensor_type][i]
+                    for feature in ALL_FEATURES:
+                        val = point.get(feature)
+                        if val is None:
+                            continue
+                        b_mean, b_std = baselines[sensor_type].get(feature, (0.0, 0.0))
+                        # Adaptive threshold: 3σ, at least 5% of mean, floor 1e-5
+                        threshold = max(3.0 * b_std, 0.05 * abs(b_mean))
+                        if threshold < 1e-5:
+                            threshold = 1e-5
+                        if abs(val - b_mean) > threshold:
+                            deviation_idx = i
+                            break
+                    if deviation_idx is not None:
                         break
                 if deviation_idx is not None:
                     break
-            if deviation_idx is not None:
-                break
-                
+
         # Set start_idx: exactly 3 normal points before the deviation point
         if deviation_idx is not None:
             start_idx = max(0, deviation_idx - 3)
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"🎯 Deviation detected at index {deviation_idx} ({datetime.datetime.fromtimestamp(accel_data[deviation_idx]['timestamp']/1000).isoformat()}). Setting start_idx to {start_idx} (3 normal points before).")
+            _logger.info(
+                f"🎯 Deviation at index {deviation_idx} "
+                f"({datetime.datetime.fromtimestamp(accel_data[deviation_idx]['timestamp']/1000).isoformat()}). "
+                f"start_idx={start_idx} (3 baseline points before deviation)."
+            )
         else:
-            # Fallback if no deviation detected: capture last 10 points
-            start_idx = max(0, failure_idx - 10)
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"⚠️ No deviation detected. Defaulting start_idx to {start_idx}.")
+            # Fallback: capture last 6 points
+            start_idx = max(0, failure_idx - 5)
+            _logger.info(f"⚠️ No deviation detected. Fallback start_idx={start_idx}.")
 
-        # Extract trends for each sensor from start_idx to failure_idx
+        # Extract trends for each sensor from start_idx to failure_idx.
+        # Uses acceleration as the master time reference to align current and audio parameters.
         trends = {}
         for sensor_type in ['acceleration', 'current', 'audio']:
-            if sensor_type not in sensor_data:
+            if sensor_type not in sensor_data or not sensor_data[sensor_type]:
                 continue
             
-            sensor_points = sensor_data[sensor_type]
-            trend_data = []
+            all_raw_points = sensor_data[sensor_type]
             
-            for i in range(start_idx, min(failure_idx + 1, len(sensor_points))):
+            # Map intervals to the closest matching timestamp of the acceleration reference point
+            sensor_points = []
+            for accel_idx in range(start_idx, failure_idx + 1):
+                ref_time = accel_data[accel_idx]['timestamp']
+                # Select the record whose timestamp is closest to the acceleration timestamp
+                best_point = min(all_raw_points, key=lambda p: abs(p['timestamp'] - ref_time))
+                sensor_points.append(best_point)
+            
+            trend_data = []
+            for idx in range(len(sensor_points)):
+                point = sensor_points[idx]
                 point_data = {
-                    'timestamp': sensor_points[i]['timestamp'],
-                    'time_delta': (sensor_points[i]['timestamp'] - failure_time) / 1000,
-                    'mean': sensor_points[i].get('mean', 0),
-                    'max': sensor_points[i].get('max', 0),
-                    'min': sensor_points[i].get('min', 0),
-                    'std_dev': sensor_points[i].get('std_dev', 0),
-                    'kurtosis': sensor_points[i].get('kurtosis', 0),
-                    'variance': sensor_points[i].get('variance', 0),
-                    'skewness': sensor_points[i].get('skewness', 0),
-                    'frequency1': sensor_points[i].get('frequency1', 0),
-                    'frequency2': sensor_points[i].get('frequency2', 0),
-                    'frequency3': sensor_points[i].get('frequency3', 0),
-                    'frequency4': sensor_points[i].get('frequency4', 0),
-                    'frequency5': sensor_points[i].get('frequency5', 0),
-                    'amplitude1': sensor_points[i].get('amplitude1', 0),
-                    'amplitude2': sensor_points[i].get('amplitude2', 0),
-                    'amplitude3': sensor_points[i].get('amplitude3', 0),
-                    'amplitude4': sensor_points[i].get('amplitude4', 0),
-                    'amplitude5': sensor_points[i].get('amplitude5', 0),
+                    'timestamp': point['timestamp'],
+                    'time_delta': (point['timestamp'] - failure_time) / 1000,
+                    'mean': point.get('mean', 0),
+                    'max': point.get('max', 0),
+                    'min': point.get('min', 0),
+                    'std_dev': point.get('std_dev', 0),
+                    'kurtosis': point.get('kurtosis', 0),
+                    'variance': point.get('variance', 0),
+                    'skewness': point.get('skewness', 0),
+                    'frequency1': point.get('frequency1', 0),
+                    'frequency2': point.get('frequency2', 0),
+                    'frequency3': point.get('frequency3', 0),
+                    'frequency4': point.get('frequency4', 0),
+                    'frequency5': point.get('frequency5', 0),
+                    'amplitude1': point.get('amplitude1', 0),
+                    'amplitude2': point.get('amplitude2', 0),
+                    'amplitude3': point.get('amplitude3', 0),
+                    'amplitude4': point.get('amplitude4', 0),
+                    'amplitude5': point.get('amplitude5', 0),
                 }
                 
-                # Calculate slopes for ALL features at this point
-                if i < len(sensor_points) - 1:
-                    next_point = sensor_points[i + 1]
-                    time_diff = next_point['timestamp'] - sensor_points[i]['timestamp']
+                # Calculate slopes based on sequential points in matched list
+                if idx < len(sensor_points) - 1:
+                    next_point = sensor_points[idx + 1]
+                    time_diff = next_point['timestamp'] - point['timestamp']
                     
                     if time_diff > 0:
-                        point_data['mean_slope'] = (next_point['mean'] - sensor_points[i]['mean']) / (time_diff / 1000)
-                        point_data['max_slope'] = (next_point['max'] - sensor_points[i]['max']) / (time_diff / 1000)
-                        point_data['min_slope'] = (next_point['min'] - sensor_points[i]['min']) / (time_diff / 1000)
-                        point_data['std_dev_slope'] = (next_point['std_dev'] - sensor_points[i]['std_dev']) / (time_diff / 1000)
-                        point_data['variance_slope'] = (next_point['variance'] - sensor_points[i]['variance']) / (time_diff / 1000)
-                        point_data['skewness_slope'] = (next_point['skewness'] - sensor_points[i]['skewness']) / (time_diff / 1000)
-                        point_data['kurtosis_slope'] = (next_point['kurtosis'] - sensor_points[i]['kurtosis']) / (time_diff / 1000)
+                        point_data['mean_slope'] = (next_point['mean'] - point['mean']) / (time_diff / 1000)
+                        point_data['max_slope'] = (next_point['max'] - point['max']) / (time_diff / 1000)
+                        point_data['min_slope'] = (next_point['min'] - point['min']) / (time_diff / 1000)
+                        point_data['std_dev_slope'] = (next_point['std_dev'] - point['std_dev']) / (time_diff / 1000)
+                        point_data['variance_slope'] = (next_point['variance'] - point['variance']) / (time_diff / 1000)
+                        point_data['skewness_slope'] = (next_point['skewness'] - point['skewness']) / (time_diff / 1000)
+                        point_data['kurtosis_slope'] = (next_point['kurtosis'] - point['kurtosis']) / (time_diff / 1000)
                     else:
-                        # No time diff
                         for feature in ALL_FEATURES:
                             point_data[f'{feature}_slope'] = 0.0
-                elif i > 0:
-                    # For the last point (failure), estimate slope from the previous point (backward slope)
-                    prev_point = sensor_points[i - 1]
-                    time_diff = sensor_points[i]['timestamp'] - prev_point['timestamp']
+                elif idx > 0:
+                    prev_point = sensor_points[idx - 1]
+                    time_diff = point['timestamp'] - prev_point['timestamp']
                     
                     if time_diff > 0:
-                        point_data['mean_slope'] = (sensor_points[i]['mean'] - prev_point['mean']) / (time_diff / 1000)
-                        point_data['max_slope'] = (sensor_points[i]['max'] - prev_point['max']) / (time_diff / 1000)
-                        point_data['min_slope'] = (sensor_points[i]['min'] - prev_point['min']) / (time_diff / 1000)
-                        point_data['std_dev_slope'] = (sensor_points[i]['std_dev'] - prev_point['std_dev']) / (time_diff / 1000)
-                        point_data['variance_slope'] = (sensor_points[i]['variance'] - prev_point['variance']) / (time_diff / 1000)
-                        point_data['skewness_slope'] = (sensor_points[i]['skewness'] - prev_point['skewness']) / (time_diff / 1000)
-                        point_data['kurtosis_slope'] = (sensor_points[i]['kurtosis'] - prev_point['kurtosis']) / (time_diff / 1000)
+                        point_data['mean_slope'] = (point['mean'] - prev_point['mean']) / (time_diff / 1000)
+                        point_data['max_slope'] = (point['max'] - prev_point['max']) / (time_diff / 1000)
+                        point_data['min_slope'] = (point['min'] - prev_point['min']) / (time_diff / 1000)
+                        point_data['std_dev_slope'] = (point['std_dev'] - prev_point['std_dev']) / (time_diff / 1000)
+                        point_data['variance_slope'] = (point['variance'] - prev_point['variance']) / (time_diff / 1000)
+                        point_data['skewness_slope'] = (point['skewness'] - prev_point['skewness']) / (time_diff / 1000)
+                        point_data['kurtosis_slope'] = (point['kurtosis'] - prev_point['kurtosis']) / (time_diff / 1000)
                     else:
                         for feature in ALL_FEATURES:
                             point_data[f'{feature}_slope'] = 0.0
                 else:
-                    # Single point fallback
                     for feature in ALL_FEATURES:
                         point_data[f'{feature}_slope'] = 0.0
                 
@@ -481,7 +552,7 @@ class EventManager:
         
         return trends
     
-    def create_event(self, event_name: str, failure_time_iso: str, description: str = "") -> Dict:
+    def create_event(self, event_name: str, failure_time_iso: str, description: str = "", start_time_iso: Optional[str] = None) -> Dict:
         """
         Create a new event with multi-sensor trend tracking BACKWARDS from failure.
         Extracts trends based on aggregated features for acceleration, current, and audio.
@@ -490,6 +561,7 @@ class EventManager:
             event_name: Name of the event (e.g., "Bearing Failure")
             failure_time_iso: ISO format timestamp of failure (e.g., "2025-11-27T12:24:00")
             description: Optional description of the event
+            start_time_iso: Optional generator run start time (prevents historical data contamination)
             
         Returns:
             Dict with event details and file paths
@@ -502,13 +574,13 @@ class EventManager:
             raise ValueError(f"Invalid failure time format: {e}")
         
         # Load sensor data (with aggregated features for all sensors)
-        sensor_data = self._load_all_sensor_data()
+        sensor_data = self._load_all_sensor_data(start_time_iso=start_time_iso)
         
         if not sensor_data.get('acceleration'):
             raise ValueError("No acceleration data available in database tables (acceleration, current, audio). Check: 1) Database connection, 2) Tables are populated, 3) Data exists from last 24 hours")
         
         # Extract multi-sensor trends
-        multi_sensor_trends = self._extract_multi_sensor_trends(sensor_data, failure_time_ms)
+        multi_sensor_trends = self._extract_multi_sensor_trends(sensor_data, failure_time_ms, fault_name=event_name)
         
         print(f"\n📊 Trend Extraction Results:")
         for sensor_type, trends in multi_sensor_trends.items():

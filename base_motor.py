@@ -27,6 +27,15 @@ SERVER_URL   = os.getenv('SERVER_URL', 'https://wilo-cloud-monitoring.onrender.c
 API_KEY      = 'sk_prod_7f3b8e2a9c1d4f6e5a2b9c8d7e1f3a5b'
 SENSOR_ID    = 'sensor-001'
 LOCAL_DATA_DIR = r'C:\Users\lewis\OneDrive\Desktop\SEMESTER 4\WILO\data'
+try:
+    if not os.path.exists(LOCAL_DATA_DIR):
+        os.makedirs(LOCAL_DATA_DIR, exist_ok=True)
+    test_file = os.path.join(LOCAL_DATA_DIR, '.write_test')
+    with open(test_file, 'w') as f:
+        f.write('test')
+    os.remove(test_file)
+except Exception:
+    LOCAL_DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), 'Data'))
 
 # ---------------------------------------------
 # MOTOR CONSTANTS  (Havells MHPE355LB8)

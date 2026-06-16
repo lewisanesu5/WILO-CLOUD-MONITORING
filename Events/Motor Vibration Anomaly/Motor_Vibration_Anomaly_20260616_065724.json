@@ -1,0 +1,46 @@
+{
+  "event_id": "Motor_Vibration_Anomaly_20260616_065724",
+  "event_name": "Motor Vibration Anomaly",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-16T06:57:24.932684",
+  "failure_timestamp_ms": 1781573244932.6838,
+  "actual_data_time_iso": "2026-06-16T06:57:24.932684",
+  "time_before_failure_seconds": 31.71291015625,
+  "total_data_points_all_sensors": 27,
+  "fault_id_in_database": 22,
+  "rows_per_sensor": {
+    "acceleration": 9,
+    "current": 9,
+    "audio": 9
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 9,
+      "max_value": 2.5765308733783128,
+      "min_value": 1.3549552815927088,
+      "avg_value": 2.036959414644148,
+      "max_slope": 0.05839500763168438,
+      "min_slope": -0.0048838922506865565,
+      "avg_slope": 0.03819939777088083
+    },
+    "current": {
+      "data_points": 9,
+      "max_value": 56.106858866613415,
+      "min_value": 23.329387810469076,
+      "avg_value": 32.668062143195414,
+      "max_slope": 4.794729752194558,
+      "min_slope": 0.4268880113286741,
+      "avg_slope": 1.0094998271614402
+    },
+    "audio": {
+      "data_points": 9,
+      "max_value": 94.68851262138175,
+      "min_value": 88.57341982919301,
+      "avg_value": 91.79793317798777,
+      "max_slope": 0.23882234352351459,
+      "min_slope": 0.08287111313049496,
+      "avg_slope": 0.19376489387099757
+    }
+  },
+  "created_at": "2026-06-16T06:57:33.293263"
+}

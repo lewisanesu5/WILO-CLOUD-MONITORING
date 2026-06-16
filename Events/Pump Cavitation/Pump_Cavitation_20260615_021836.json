@@ -1,0 +1,46 @@
+{
+  "event_id": "Pump_Cavitation_20260615_021836",
+  "event_name": "Pump Cavitation",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-15T02:18:36.617936",
+  "failure_timestamp_ms": 1781470116617.9358,
+  "actual_data_time_iso": "2026-06-15T02:18:36.617936",
+  "time_before_failure_seconds": 11.901157958984374,
+  "total_data_points_all_sensors": 12,
+  "fault_id_in_database": 23,
+  "rows_per_sensor": {
+    "acceleration": 4,
+    "current": 4,
+    "audio": 4
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 4,
+      "max_value": 14.60873599889365,
+      "min_value": 1.4993770746672765,
+      "avg_value": 4.778505829158443,
+      "max_slope": 3.1601086420777467,
+      "min_slope": 0.00047444062044338343,
+      "avg_slope": 1.0538266025988101
+    },
+    "current": {
+      "data_points": 4,
+      "max_value": 47.695084384151926,
+      "min_value": 21.94545369004205,
+      "avg_value": 28.424071453459188,
+      "max_slope": 6.183096880030212,
+      "min_slope": -0.015292895500768072,
+      "avg_slope": 2.06501727347163
+    },
+    "audio": {
+      "data_points": 4,
+      "max_value": 87.15700731821916,
+      "min_value": 86.9124535553105,
+      "avg_value": 87.01509513108749,
+      "max_slope": -0.01347089528898708,
+      "min_slope": -0.03461982618760932,
+      "avg_slope": -0.020704690219875675
+    }
+  },
+  "created_at": "2026-06-15T02:18:41.996422"
+}

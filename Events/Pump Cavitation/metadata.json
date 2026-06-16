@@ -1,0 +1,8 @@
+{
+  "fault_name": "Pump Cavitation",
+  "start_time": "2026-06-15T19:48:39.766914",
+  "end_time": null,
+  "failure_interval": null,
+  "system_failure_state": false,
+  "intervals": []
+}

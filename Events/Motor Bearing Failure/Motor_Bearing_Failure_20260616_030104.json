@@ -1,0 +1,46 @@
+{
+  "event_id": "Motor_Bearing_Failure_20260616_030104",
+  "event_name": "Motor Bearing Failure",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-16T03:01:04.697290",
+  "failure_timestamp_ms": 1781559064697.29,
+  "actual_data_time_iso": "2026-06-16T03:01:04.697290",
+  "time_before_failure_seconds": 39.68523999023437,
+  "total_data_points_all_sensors": 33,
+  "fault_id_in_database": 1,
+  "rows_per_sensor": {
+    "acceleration": 11,
+    "current": 11,
+    "audio": 11
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 11,
+      "max_value": 12.715193207284875,
+      "min_value": 2.730126530731569,
+      "avg_value": 7.458117405512368,
+      "max_slope": 0.40515780239724,
+      "min_slope": 0.10498656884208374,
+      "avg_slope": 0.25322435202878496
+    },
+    "current": {
+      "data_points": 11,
+      "max_value": 65.1362089073223,
+      "min_value": 20.02326242730196,
+      "avg_value": 30.922169052834285,
+      "max_slope": 6.882228839756723,
+      "min_slope": 0.4149231291236753,
+      "avg_slope": 1.0710130189682803
+    },
+    "audio": {
+      "data_points": 11,
+      "max_value": 95.95092965019873,
+      "min_value": 89.41299940158292,
+      "avg_value": 92.65424279555428,
+      "max_slope": 0.18578292155424275,
+      "min_slope": 0.13735645634283467,
+      "avg_slope": 0.16514841358414867
+    }
+  },
+  "created_at": "2026-06-16T03:01:14.854177"
+}

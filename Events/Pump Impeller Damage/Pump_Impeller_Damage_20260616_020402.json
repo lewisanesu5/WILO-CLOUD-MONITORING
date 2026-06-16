@@ -1,0 +1,46 @@
+{
+  "event_id": "Pump_Impeller_Damage_20260616_020402",
+  "event_name": "Pump Impeller Damage",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-16T02:04:02.044536",
+  "failure_timestamp_ms": 1781555642044.5361,
+  "actual_data_time_iso": "2026-06-16T02:04:02.044536",
+  "time_before_failure_seconds": 12.6536591796875,
+  "total_data_points_all_sensors": 12,
+  "fault_id_in_database": 43,
+  "rows_per_sensor": {
+    "acceleration": 4,
+    "current": 4,
+    "audio": 4
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 4,
+      "max_value": 1.200144361030901,
+      "min_value": 0.36423606741199016,
+      "avg_value": 0.9910295497952357,
+      "max_slope": 7.890096691553666e-05,
+      "min_slope": -0.21250841750568583,
+      "avg_slope": -0.07080193865883437
+    },
+    "current": {
+      "data_points": 4,
+      "max_value": 48.008442385657574,
+      "min_value": 19.983061850312332,
+      "avg_value": 27.006896869211747,
+      "max_slope": 7.08988664314274,
+      "min_slope": 0.00268030534735466,
+      "avg_slope": 2.3662572239194435
+    },
+    "audio": {
+      "data_points": 4,
+      "max_value": 86.14167736707061,
+      "min_value": 85.80521478637152,
+      "avg_value": 85.97190350020782,
+      "max_slope": -0.012420060809782689,
+      "min_slope": -0.03521155738382006,
+      "avg_slope": -0.026892895015853614
+    }
+  },
+  "created_at": "2026-06-16T02:04:07.954157"
+}

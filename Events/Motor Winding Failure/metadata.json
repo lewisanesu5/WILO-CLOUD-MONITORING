@@ -1,0 +1,8 @@
+{
+  "fault_name": "Motor Winding Failure",
+  "start_time": "2026-06-16T01:02:43.830846",
+  "end_time": null,
+  "failure_interval": null,
+  "system_failure_state": false,
+  "intervals": []
+}

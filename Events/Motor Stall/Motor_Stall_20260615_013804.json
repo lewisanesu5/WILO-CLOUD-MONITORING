@@ -1,0 +1,46 @@
+{
+  "event_id": "Motor_Stall_20260615_013804",
+  "event_name": "Motor Stall",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-15T01:38:04.493950",
+  "failure_timestamp_ms": 1781467684493.95,
+  "actual_data_time_iso": "2026-06-15T01:38:04.493950",
+  "time_before_failure_seconds": 12.35318017578125,
+  "total_data_points_all_sensors": 12,
+  "fault_id_in_database": 35,
+  "rows_per_sensor": {
+    "acceleration": 4,
+    "current": 4,
+    "audio": 4
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 4,
+      "max_value": 5.005086242688591,
+      "min_value": 0.49937363410751684,
+      "avg_value": 1.6263512850285269,
+      "max_slope": 1.0265005311017823,
+      "min_slope": -0.00035224395795670785,
+      "avg_slope": 0.34211613057253243
+    },
+    "current": {
+      "data_points": 4,
+      "max_value": 60.00467456693929,
+      "min_value": 17.960855396701813,
+      "avg_value": 28.484815391239785,
+      "max_slope": 9.543830083961417,
+      "min_slope": -0.005777916848839691,
+      "avg_slope": 3.1817814026417888
+    },
+    "audio": {
+      "data_points": 4,
+      "max_value": 88.13789968477394,
+      "min_value": 87.87168326861271,
+      "avg_value": 87.98811914462176,
+      "max_slope": 0.048078711422867515,
+      "min_slope": -0.002095334934684552,
+      "avg_slope": 0.021007459838342044
+    }
+  },
+  "created_at": "2026-06-15T01:38:10.403237"
+}

@@ -1,0 +1,8 @@
+{
+  "fault_name": "Pump Seal Leakage",
+  "start_time": "2026-06-15T21:29:22.575744",
+  "end_time": null,
+  "failure_interval": null,
+  "system_failure_state": false,
+  "intervals": []
+}

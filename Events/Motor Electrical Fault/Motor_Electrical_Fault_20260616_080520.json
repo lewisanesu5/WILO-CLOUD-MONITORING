@@ -1,0 +1,46 @@
+{
+  "event_id": "Motor_Electrical_Fault_20260616_080520",
+  "event_name": "Motor Electrical Fault",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-16T08:05:20.425984",
+  "failure_timestamp_ms": 1781577320425.984,
+  "actual_data_time_iso": "2026-06-16T08:05:20.425984",
+  "time_before_failure_seconds": 48.96257397460938,
+  "total_data_points_all_sensors": 39,
+  "fault_id_in_database": 35,
+  "rows_per_sensor": {
+    "acceleration": 13,
+    "current": 13,
+    "audio": 13
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 13,
+      "max_value": 2.1467396117904234,
+      "min_value": 1.0389241156540998,
+      "avg_value": 1.6003834493878593,
+      "max_slope": 0.04546381689542465,
+      "min_slope": 0.009867673611573253,
+      "avg_slope": 0.022766232759714164
+    },
+    "current": {
+      "data_points": 13,
+      "max_value": 148.89755610827814,
+      "min_value": 19.92975508799713,
+      "avg_value": 36.278735944942774,
+      "max_slope": 28.594842944023977,
+      "min_slope": 0.2132183509990313,
+      "avg_slope": 2.670297502553163
+    },
+    "audio": {
+      "data_points": 13,
+      "max_value": 122.42627478888554,
+      "min_value": 92.35460642154378,
+      "avg_value": 106.07564363523001,
+      "max_slope": 0.8097949256911255,
+      "min_slope": 0.36097685149952874,
+      "avg_slope": 0.6147052750039802
+    }
+  },
+  "created_at": "2026-06-16T08:05:31.646066"
+}

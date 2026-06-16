@@ -1,0 +1,46 @@
+{
+  "event_id": "Motor_Overheating_20260615_062633",
+  "event_name": "Motor Overheating",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-15T06:26:33.053034",
+  "failure_timestamp_ms": 1781484993053.0342,
+  "actual_data_time_iso": "2026-06-15T06:26:33.053034",
+  "time_before_failure_seconds": 34.739569091796874,
+  "total_data_points_all_sensors": 30,
+  "fault_id_in_database": 26,
+  "rows_per_sensor": {
+    "acceleration": 10,
+    "current": 10,
+    "audio": 10
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 10,
+      "max_value": 2.8255068413300473,
+      "min_value": 1.2015170124132735,
+      "avg_value": 2.0826808594176356,
+      "max_slope": 0.06100059209768288,
+      "min_slope": -0.004063985827058011,
+      "avg_slope": 0.04627456132698394
+    },
+    "current": {
+      "data_points": 10,
+      "max_value": 61.96042038553087,
+      "min_value": 23.442714629489462,
+      "avg_value": 33.85299012091463,
+      "max_slope": 6.233213991764991,
+      "min_slope": 0.4643693312229906,
+      "avg_slope": 1.1113612316741261
+    },
+    "audio": {
+      "data_points": 10,
+      "max_value": 96.12795775598369,
+      "min_value": 89.50376850767763,
+      "avg_value": 92.73752375271923,
+      "max_slope": 0.23381027808431265,
+      "min_slope": 0.16024827771215758,
+      "avg_slope": 0.1906750347460644
+    }
+  },
+  "created_at": "2026-06-15T06:26:41.735817"
+}

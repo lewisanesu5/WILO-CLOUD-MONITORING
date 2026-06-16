@@ -1,0 +1,46 @@
+{
+  "event_id": "Pump_Seal_Leakage_20260615_033143",
+  "event_name": "Pump Seal Leakage",
+  "description": "auto-triggered after generator completed",
+  "failure_time_iso": "2026-06-15T03:31:43.673207",
+  "failure_timestamp_ms": 1781474503673.207,
+  "actual_data_time_iso": "2026-06-15T03:31:43.673207",
+  "time_before_failure_seconds": 11.59364404296875,
+  "total_data_points_all_sensors": 12,
+  "fault_id_in_database": 2,
+  "rows_per_sensor": {
+    "acceleration": 4,
+    "current": 4,
+    "audio": 4
+  },
+  "sensor_statistics": {
+    "acceleration": {
+      "data_points": 4,
+      "max_value": 5.63795770954876,
+      "min_value": 0.8977368490324719,
+      "avg_value": 2.083626194222261,
+      "max_slope": 1.23247589883682,
+      "min_slope": -0.0007366379949687935,
+      "avg_slope": 0.41055944955030105
+    },
+    "current": {
+      "data_points": 4,
+      "max_value": 41.97701634363677,
+      "min_value": 18.962959141597278,
+      "avg_value": 24.74032867900017,
+      "max_slope": 5.966187925162491,
+      "min_slope": -0.010312962842521567,
+      "avg_slope": 1.9828850152735449
+    },
+    "audio": {
+      "data_points": 4,
+      "max_value": 84.04509200607104,
+      "min_value": 83.79259399558573,
+      "avg_value": 83.95728770905302,
+      "max_slope": 0.06566496401095785,
+      "min_slope": -0.05963077486057088,
+      "avg_slope": 0.006639686247474033
+    }
+  },
+  "created_at": "2026-06-15T03:31:48.866749"
+}

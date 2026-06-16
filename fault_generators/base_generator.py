@@ -5,12 +5,27 @@ Provides common functionality for all fault generators
 
 import os
 import csv
+import sys
 import json
 import numpy as np
 from datetime import datetime
 from scipy import stats as sp_stats
 import time
 import logging
+from pathlib import Path
+
+# Make the project root importable (database, fft_analysis, event_manager live there)
+_BASE_DIR = Path(__file__).resolve().parent.parent
+if str(_BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(_BASE_DIR))
+
+# Safe import of database helpers — not available in all environments
+try:
+    from database import save_statistics, save_raw_datapoints
+    from fft_analysis import calculate_fft_analysis
+    _DB_AVAILABLE = True
+except ImportError:
+    _DB_AVAILABLE = False
 
 # Configuration
 FREQUENCY = 700  # Hz
@@ -55,11 +70,11 @@ class BaseGenerator:
         self.failure_triggered = False
         self.failure_interval = None
         self.system_failure_state = False
-        self.start_time = datetime.now().isoformat()
+        self.start_time = datetime.utcnow().isoformat()
         self.intervals_data = []
         
-        # Seed random for reproducibility
-        np.random.seed(hash(fault_name) % 2**32)
+        # Seed random with time-based entropy so each run produces unique data for ML training
+        np.random.seed(int(time.time() * 1000) % 2**32)
         
         # Initialize metadata file
         self._init_metadata()
@@ -262,14 +277,113 @@ class BaseGenerator:
             f"Interval {self.interval_count}: Generated 6 files | "
             f"State: {state_str}"
         )
-        
+
+        # -- Save statistics and raw datapoints to Neon database in real-time --
+        self._save_interval_to_db(accel_data, current_data, audio_data)
+
         # Stop generation if system failed
         if self.system_failure_state:
             self.logger.warning(f"🔥 SYSTEM FAILURE at interval {self.failure_interval}")
             return False  # Signal to stop infinite loop
-        
+
         return True  # Continue generating
     
+    def _save_interval_to_db(self, accel_data, current_data, audio_data):
+        """
+        Save the current interval's raw data and statistics to Neon database.
+        Called after every interval so EventManager always has fresh rows.
+        Silently skipped if the database helpers are not importable.
+        """
+        if not _DB_AVAILABLE:
+            self.logger.debug("[DB-SAVE] database helpers not available, skipping Neon save.")
+            return
+
+        sensors = {
+            'acceleration': accel_data,
+            'current':      current_data,
+            'audio':        audio_data,
+        }
+
+        for sensor_name, raw_data in sensors.items():
+            try:
+                arr = np.asarray(raw_data, dtype=np.float64)
+                arr = arr[np.isfinite(arr)]  # strip NaN / Inf
+                if arr.size == 0:
+                    self.logger.warning(f"[DB-SAVE] {sensor_name}: all values non-finite, skipping")
+                    continue
+
+                stats_dict = {
+                    'mean':     float(np.mean(arr)),
+                    'max':      float(np.max(arr)),
+                    'min':      float(np.min(arr)),
+                    'std_dev':  float(np.std(arr)),
+                    'range':    float(np.max(arr) - np.min(arr)),
+                    'skewness': float(sp_stats.skew(arr)),
+                    'kurtosis': float(sp_stats.kurtosis(arr)),
+                }
+
+                # FFT on raw array — use the 1400-point waveform
+                freqs, amps = calculate_fft_analysis(arr.tolist())
+
+                save_statistics(sensor_name, 'max', stats_dict, freqs, amps)
+
+                # Raw datapoints: timestamps in milliseconds (relative to epoch=0 for now)
+                raw_timestamps = [int(i * SAMPLE_INTERVAL) for i in range(len(arr))]
+                save_raw_datapoints(
+                    sensor_name, 'max',
+                    timestamp_ms=time.time() * 1000,
+                    datapoints=arr.tolist(),
+                    datapoint_timestamps=raw_timestamps,
+                )
+
+                self.logger.info(f"[DB-SAVE] ✓ {sensor_name} interval {self.interval_count} saved to Neon")
+
+            except Exception as exc:
+                self.logger.error(f"[DB-SAVE] Failed to save {sensor_name} to Neon: {exc}", exc_info=True)
+
+    def trigger_auto_event(self):
+        """
+        Auto-create a fault event in the database after the generator completes.
+        Uses EventManager to detect the deviation window and insert rows into
+        the appropriate fault table — same logic as the manual 'Create Event' button.
+        """
+        if not _DB_AVAILABLE:
+            self.logger.warning("[AUTO-EVENT] database helpers not importable, skipping auto-event.")
+            return
+
+        try:
+            from event_manager import EventManager
+        except ImportError as e:
+            self.logger.error(f"[AUTO-EVENT] Cannot import EventManager: {e}")
+            return
+
+        try:
+            failure_time = datetime.now().isoformat()
+            self.logger.info(f"[AUTO-EVENT] Triggering automatic event creation for '{self.fault_name}' at {failure_time}")
+
+            em = EventManager(
+                events_dir=self.events_dir,
+                data_dir=self.data_dir,
+            )
+            result = em.create_event(
+                event_name=self.fault_name,
+                failure_time_iso=failure_time,
+                description="auto-triggered after generator completed",
+                start_time_iso=self.start_time,
+            )
+
+            if result.get('success'):
+                self.logger.info(
+                    f"[AUTO-EVENT] ✓ Event created successfully! "
+                    f"fault_id={result.get('fault_id')}  "
+                    f"rows_inserted={result.get('total_rows_inserted')}"
+                )
+            else:
+                self.logger.warning(f"[AUTO-EVENT] Event creation returned failure: {result}")
+
+        except Exception as exc:
+            self.logger.error(f"[AUTO-EVENT] Exception during auto-event: {exc}", exc_info=True)
+
     def run_indefinitely(self):
         """Run generator indefinitely with 30-second intervals."""
         try:
@@ -291,6 +405,15 @@ class BaseGenerator:
                     break
                     
                 time.sleep(GENERATION_INTERVAL)
+
+            # ----------------------------------------------------------------
+            # Fault run complete: auto-create the event in the database.
+            # This fires ONLY when the loop terminated because the generator
+            # reached system_failure_state (not on KeyboardInterrupt).
+            # ----------------------------------------------------------------
+            if self.system_failure_state and _DB_AVAILABLE:
+                self.trigger_auto_event()
+
         except KeyboardInterrupt:
             self.logger.info(f"Generator stopped by user")
         except Exception as e:
